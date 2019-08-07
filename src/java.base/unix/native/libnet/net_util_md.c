@@ -305,12 +305,12 @@ jint  IPv6_supported()
     }
 
     /*
-     * If fd 0 is a socket it means we've been launched from inetd or
+     * If fd 0 is a socket it means we may have been launched from inetd or
      * xinetd. If it's a socket then check the family - if it's an
      * IPv4 socket then we need to disable IPv6.
      */
     if (getsockname(0, &sa.sa, &sa_len) == 0) {
-        if (sa.sa.sa_family != AF_INET6) {
+        if (sa.sa.sa_family == AF_INET) {
             close(fd);
             return JNI_FALSE;
         }
@@ -584,6 +584,8 @@ static void initLoopbackRoutes() {
 
                 if (loRoutesTemp == 0) {
                     free(loRoutes);
+                    loRoutes = NULL;
+                    nRoutes = 0;
                     fclose (f);
                     return;
                 }
@@ -1081,7 +1083,7 @@ int getDefaultIPv6Interface(struct in6_addr *target_addr) {
              * dest_plen % 8    => number of additional bits to match
              *
              * eg: fe80::/10 => match 1 byte + 2 additional bits in the
-             *                  the next byte.
+             *                  next byte.
              */
             int byte_count = dest_plen >> 3;
             int extra_bits = dest_plen & 0x3;

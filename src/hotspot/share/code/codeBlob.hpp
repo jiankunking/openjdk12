@@ -116,7 +116,12 @@ protected:
 
   CodeBlob(const char* name, CompilerType type, const CodeBlobLayout& layout, int frame_complete_offset, int frame_size, ImmutableOopMapSet* oop_maps, bool caller_must_gc_arguments);
   CodeBlob(const char* name, CompilerType type, const CodeBlobLayout& layout, CodeBuffer* cb, int frame_complete_offset, int frame_size, OopMapSet* oop_maps, bool caller_must_gc_arguments);
+
 public:
+  // Only used by unit test.
+  CodeBlob()
+    : _type(compiler_none) {}
+
   // Returns the space needed for CodeBlob
   static unsigned int allocation_size(CodeBuffer* cb, int header_size);
   static unsigned int align_code_offset(int offset);
@@ -393,6 +398,10 @@ class BufferBlob: public RuntimeBlob {
   BufferBlob(const char* name, int size);
   BufferBlob(const char* name, int size, CodeBuffer* cb);
 
+  // This ordinary operator delete is needed even though not used, so the
+  // below two-argument operator delete will be treated as a placement
+  // delete rather than an ordinary sized delete; see C++14 3.7.4.2/p2.
+  void operator delete(void* p);
   void* operator new(size_t s, unsigned size) throw();
 
  public:
@@ -476,6 +485,10 @@ class RuntimeStub: public RuntimeBlob {
     bool        caller_must_gc_arguments
   );
 
+  // This ordinary operator delete is needed even though not used, so the
+  // below two-argument operator delete will be treated as a placement
+  // delete rather than an ordinary sized delete; see C++14 3.7.4.2/p2.
+  void operator delete(void* p);
   void* operator new(size_t s, unsigned size) throw();
 
  public:
@@ -511,6 +524,10 @@ class SingletonBlob: public RuntimeBlob {
   friend class VMStructs;
 
  protected:
+  // This ordinary operator delete is needed even though not used, so the
+  // below two-argument operator delete will be treated as a placement
+  // delete rather than an ordinary sized delete; see C++14 3.7.4.2/p2.
+  void operator delete(void* p);
   void* operator new(size_t s, unsigned size) throw();
 
  public:

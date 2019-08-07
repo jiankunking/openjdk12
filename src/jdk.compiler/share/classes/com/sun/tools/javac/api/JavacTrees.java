@@ -451,6 +451,9 @@ public class JavacTrees extends DocTrees {
                     toplevel.packge = msym.unnamedPackage;
                     Symbol sym = attr.attribIdent(ref.qualifierExpression, toplevel);
 
+                    if (sym == null)
+                        return null;
+
                     sym.complete();
 
                     if ((sym.kind == PCK || sym.kind == TYP) && sym.exists()) {
@@ -471,7 +474,11 @@ public class JavacTrees extends DocTrees {
                         }
                     }
                 } else {
-                    tsym = t.tsym;
+                    Type e = t;
+                    // If this is an array type convert to element type
+                    while (e instanceof ArrayType)
+                        e = ((ArrayType)e).elemtype;
+                    tsym = e.tsym;
                     memberName = (Name) ref.memberName;
                 }
             }

@@ -55,7 +55,6 @@ private:
 
   // The string table
   static StringTable* _the_table;
-  static volatile bool _shared_string_mapped;
   static volatile bool _alt_hash;
 
 private:
@@ -73,15 +72,15 @@ private:
   volatile size_t _uncleaned_items_count;
   DEFINE_PAD_MINUS_SIZE(2, DEFAULT_CACHE_LINE_SIZE, sizeof(volatile size_t));
 
-  double get_load_factor();
-  double get_dead_factor();
+  double get_load_factor() const;
+  double get_dead_factor() const;
 
   void check_concurrent_work();
   void trigger_concurrent_work();
 
   static size_t item_added();
   static void item_removed();
-  size_t add_items_count_to_clean(size_t ndead);
+  size_t add_items_to_clean(size_t ndead);
 
   StringTable();
 
@@ -94,6 +93,7 @@ private:
 
   void try_rehash_table();
   bool do_rehash();
+  inline void update_needs_rehash(bool rehash);
 
  public:
   // The string table
@@ -125,7 +125,7 @@ private:
   // If GC uses ParState directly it should add the number of cleared
   // strings to this method.
   static void inc_dead_counter(size_t ndead) {
-    the_table()->add_items_count_to_clean(ndead);
+    the_table()->add_items_to_clean(ndead);
   }
 
   //   Delete pointers to otherwise-unreachable objects.
@@ -166,8 +166,6 @@ private:
   static void copy_shared_string_table(CompactHashtableWriter* ch_table) NOT_CDS_JAVA_HEAP_RETURN;
  public:
   static oop create_archived_string(oop s, Thread* THREAD) NOT_CDS_JAVA_HEAP_RETURN_(NULL);
-  static void set_shared_string_mapped() { _shared_string_mapped = true; }
-  static bool shared_string_mapped()     { return _shared_string_mapped; }
   static void shared_oops_do(OopClosure* f) NOT_CDS_JAVA_HEAP_RETURN;
   static void write_to_archive() NOT_CDS_JAVA_HEAP_RETURN;
   static void serialize_shared_table_header(SerializeClosure* soc) NOT_CDS_JAVA_HEAP_RETURN;

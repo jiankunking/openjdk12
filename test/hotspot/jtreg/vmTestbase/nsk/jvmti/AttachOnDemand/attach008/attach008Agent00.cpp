@@ -41,7 +41,7 @@ extern "C" {
 static Options* options = NULL;
 static const char* agentName;
 
-static jvmtiEvent testEvents[] = {JVMTI_EVENT_MONITOR_CONTENDED_ENTER, JVMTI_EVENT_MONITOR_CONTENDED_ENTERED};
+static jvmtiEvent testEvents[] = { JVMTI_EVENT_MONITOR_CONTENDED_ENTER, JVMTI_EVENT_MONITOR_CONTENDED_ENTERED };
 static const int testEventsNumber = 2;
 
 static volatile int monitorEnter = 0;
@@ -73,7 +73,7 @@ void JNICALL monitorContentedEnteredHandler(
         jobject object) {
     char threadName[MAX_STRING_LENGTH];
 
-    if(!nsk_jvmti_aod_getThreadName(jvmti, thread, threadName)) {
+    if (!nsk_jvmti_aod_getThreadName(jvmti, thread, threadName)) {
         nsk_jvmti_aod_disableEventsAndFinish(agentName, testEvents, testEventsNumber, 0, jvmti, jni);
         return;
     }

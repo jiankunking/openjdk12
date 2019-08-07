@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
 #include "precompiled.hpp"
 #include "opto/compile.hpp"
 #include "opto/castnode.hpp"
+#include "opto/escape.hpp"
 #include "opto/graphKit.hpp"
 #include "opto/idealKit.hpp"
 #include "opto/loopnode.hpp"
@@ -188,6 +189,15 @@ LoadBarrierNode::LoadBarrierNode(Compile* C,
   bs->register_potential_barrier_node(this);
 }
 
+uint LoadBarrierNode::size_of() const {
+  return sizeof(*this);
+}
+
+uint LoadBarrierNode::cmp(const Node& n) const {
+  ShouldNotReachHere();
+  return 0;
+}
+
 const Type *LoadBarrierNode::bottom_type() const {
   const Type** floadbarrier = (const Type **)(Compile::current()->type_arena()->Amalloc_4((Number_of_Outputs)*sizeof(Type*)));
   Node* in_oop = in(Oop);
@@ -195,6 +205,11 @@ const Type *LoadBarrierNode::bottom_type() const {
   floadbarrier[Memory] = Type::MEMORY;
   floadbarrier[Oop] = in_oop == NULL ? Type::TOP : in_oop->bottom_type();
   return TypeTuple::make(Number_of_Outputs, floadbarrier);
+}
+
+const TypePtr* LoadBarrierNode::adr_type() const {
+  ShouldNotReachHere();
+  return NULL;
 }
 
 const Type *LoadBarrierNode::Value(PhaseGVN *phase) const {
@@ -440,6 +455,11 @@ Node *LoadBarrierNode::Ideal(PhaseGVN *phase, bool can_reshape) {
   return NULL;
 }
 
+uint LoadBarrierNode::match_edge(uint idx) const {
+  ShouldNotReachHere();
+  return 0;
+}
+
 void LoadBarrierNode::fix_similar_in_uses(PhaseIterGVN* igvn) {
   Node* out_res = proj_out_or_null(Oop);
   if (out_res == NULL) {
@@ -474,10 +494,10 @@ bool LoadBarrierNode::has_true_uses() const {
 
 // == Accesses ==
 
-Node* ZBarrierSetC2::make_cas_loadbarrier(C2AtomicAccess& access) const {
+Node* ZBarrierSetC2::make_cas_loadbarrier(C2AtomicParseAccess& access) const {
   assert(!UseCompressedOops, "Not allowed");
   CompareAndSwapNode* cas = (CompareAndSwapNode*)access.raw_access();
-  PhaseGVN& gvn = access.kit()->gvn();
+  PhaseGVN& gvn = access.gvn();
   Compile* C = Compile::current();
   GraphKit* kit = access.kit();
 
@@ -566,7 +586,7 @@ Node* ZBarrierSetC2::make_cas_loadbarrier(C2AtomicAccess& access) const {
   return phi;
 }
 
-Node* ZBarrierSetC2::make_cmpx_loadbarrier(C2AtomicAccess& access) const {
+Node* ZBarrierSetC2::make_cmpx_loadbarrier(C2AtomicParseAccess& access) const {
   CompareAndExchangePNode* cmpx = (CompareAndExchangePNode*)access.raw_access();
   GraphKit* kit = access.kit();
   PhaseGVN& gvn = kit->gvn();
@@ -657,15 +677,13 @@ Node* ZBarrierSetC2::load_barrier(GraphKit* kit, Node* val, Node* adr, bool weak
       kit->set_control(gvn.transform(new ProjNode(barrier, LoadBarrierNode::Control)));
     }
     Node* result = gvn.transform(new ProjNode(transformed_barrier, LoadBarrierNode::Oop));
-    assert(is_gc_barrier_node(result), "sanity");
-    assert(step_over_gc_barrier(result) == val, "sanity");
     return result;
   } else {
     return val;
   }
 }
 
-static bool barrier_needed(C2Access access) {
+static bool barrier_needed(C2Access& access) {
   return ZBarrierSet::barrier_needed(access.decorators(), access.type());
 }
 
@@ -677,7 +695,9 @@ Node* ZBarrierSetC2::load_at_resolved(C2Access& access, const Type* val_type) co
 
   bool weak = (access.decorators() & ON_WEAK_OOP_REF) != 0;
 
-  GraphKit* kit = access.kit();
+  assert(access.is_parse_access(), "entry not supported at optimization time");
+  C2ParseAccess& parse_access = static_cast<C2ParseAccess&>(access);
+  GraphKit* kit = parse_access.kit();
   PhaseGVN& gvn = kit->gvn();
   Node* adr = access.addr().node();
   Node* heap_base_oop = access.base();
@@ -707,11 +727,11 @@ Node* ZBarrierSetC2::load_at_resolved(C2Access& access, const Type* val_type) co
     }
     return p;
   } else {
-    return load_barrier(access.kit(), p, access.addr().node(), weak, true, true);
+    return load_barrier(parse_access.kit(), p, access.addr().node(), weak, true, true);
   }
 }
 
-Node* ZBarrierSetC2::atomic_cmpxchg_val_at_resolved(C2AtomicAccess& access, Node* expected_val,
+Node* ZBarrierSetC2::atomic_cmpxchg_val_at_resolved(C2AtomicParseAccess& access, Node* expected_val,
                                                     Node* new_val, const Type* val_type) const {
   Node* result = BarrierSetC2::atomic_cmpxchg_val_at_resolved(access, expected_val, new_val, val_type);
   if (!barrier_needed(access)) {
@@ -722,7 +742,7 @@ Node* ZBarrierSetC2::atomic_cmpxchg_val_at_resolved(C2AtomicAccess& access, Node
   return make_cmpx_loadbarrier(access);
 }
 
-Node* ZBarrierSetC2::atomic_cmpxchg_bool_at_resolved(C2AtomicAccess& access, Node* expected_val,
+Node* ZBarrierSetC2::atomic_cmpxchg_bool_at_resolved(C2AtomicParseAccess& access, Node* expected_val,
                                                      Node* new_val, const Type* value_type) const {
   Node* result = BarrierSetC2::atomic_cmpxchg_bool_at_resolved(access, expected_val, new_val, value_type);
   if (!barrier_needed(access)) {
@@ -746,7 +766,7 @@ Node* ZBarrierSetC2::atomic_cmpxchg_bool_at_resolved(C2AtomicAccess& access, Nod
   return load_store;
 }
 
-Node* ZBarrierSetC2::atomic_xchg_at_resolved(C2AtomicAccess& access, Node* new_val, const Type* val_type) const {
+Node* ZBarrierSetC2::atomic_xchg_at_resolved(C2AtomicParseAccess& access, Node* new_val, const Type* val_type) const {
   Node* result = BarrierSetC2::atomic_xchg_at_resolved(access, new_val, val_type);
   if (!barrier_needed(access)) {
     return result;
@@ -755,7 +775,9 @@ Node* ZBarrierSetC2::atomic_xchg_at_resolved(C2AtomicAccess& access, Node* new_v
   Node* load_store = access.raw_access();
   Node* adr = access.addr().node();
 
-  return load_barrier(access.kit(), load_store, adr, false, false, false);
+  assert(access.is_parse_access(), "entry not supported at optimization time");
+  C2ParseAccess& parse_access = static_cast<C2ParseAccess&>(access);
+  return load_barrier(parse_access.kit(), load_store, adr, false, false, false);
 }
 
 // == Macro Expansion ==
@@ -991,15 +1013,13 @@ void ZBarrierSetC2::expand_loadbarrier_optimized(PhaseMacroExpand* phase, LoadBa
   return;
 }
 
-bool ZBarrierSetC2::expand_macro_nodes(PhaseMacroExpand* macro) const {
-  Compile* C = Compile::current();
-  PhaseIterGVN &igvn = macro->igvn();
+bool ZBarrierSetC2::expand_barriers(Compile* C, PhaseIterGVN& igvn) const {
   ZBarrierSetC2State* s = state();
   if (s->load_barrier_count() > 0) {
+    PhaseMacroExpand macro(igvn);
 #ifdef ASSERT
     verify_gc_barriers(false);
 #endif
-    igvn.set_delay_transform(true);
     int skipped = 0;
     while (s->load_barrier_count() > skipped) {
       int load_barrier_count = s->load_barrier_count();
@@ -1013,7 +1033,7 @@ bool ZBarrierSetC2::expand_macro_nodes(PhaseMacroExpand* macro) const {
         skipped++;
         continue;
       }
-      expand_loadbarrier_node(macro, n);
+      expand_loadbarrier_node(&macro, n);
       assert(s->load_barrier_count() < load_barrier_count, "must have deleted a node from load barrier list");
       if (C->failing())  return true;
     }
@@ -1022,7 +1042,7 @@ bool ZBarrierSetC2::expand_macro_nodes(PhaseMacroExpand* macro) const {
       LoadBarrierNode* n = s->load_barrier_node(load_barrier_count - 1);
       assert(!(igvn.type(n) == Type::TOP || (n->in(0) != NULL && n->in(0)->is_top())), "should have been processed already");
       assert(!n->can_be_eliminated(), "should have been processed already");
-      expand_loadbarrier_node(macro, n);
+      expand_loadbarrier_node(&macro, n);
       assert(s->load_barrier_count() < load_barrier_count, "must have deleted a node from load barrier list");
       if (C->failing())  return true;
     }
@@ -1150,7 +1170,7 @@ static bool split_barrier_thru_phi(PhaseIdealLoop* phase, LoadBarrierNode* lb) {
   if (lb->in(LoadBarrierNode::Oop)->is_Phi()) {
     Node* oop_phi = lb->in(LoadBarrierNode::Oop);
 
-    if (oop_phi->in(2) == oop_phi) {
+    if ((oop_phi->req() != 3) || (oop_phi->in(2) == oop_phi)) {
       // Ignore phis with only one input
       return false;
     }
@@ -1431,6 +1451,40 @@ bool ZBarrierSetC2::array_copy_requires_gc_barriers(bool tightly_coupled_alloc, 
   return type == T_OBJECT || type == T_ARRAY;
 }
 
+bool ZBarrierSetC2::final_graph_reshaping(Compile* compile, Node* n, uint opcode) const {
+  bool handled;
+  switch (opcode) {
+    case Op_LoadBarrierSlowReg:
+    case Op_LoadBarrierWeakSlowReg:
+#ifdef ASSERT
+      if (VerifyOptoOopOffsets) {
+        MemNode* mem  = n->as_Mem();
+        // Check to see if address types have grounded out somehow.
+        const TypeInstPtr* tp = mem->in(MemNode::Address)->bottom_type()->isa_instptr();
+        ciInstanceKlass* k = tp->klass()->as_instance_klass();
+        bool oop_offset_is_sane = k->contains_field_offset(tp->offset());
+        assert(!tp || oop_offset_is_sane, "");
+      }
+#endif
+      handled = true;
+      break;
+    default:
+      handled = false;
+  }
+  return handled;
+}
+
+bool ZBarrierSetC2::matcher_find_shared_visit(Matcher* matcher, Matcher::MStack& mstack, Node* n, uint opcode, bool& mem_op, int& mem_addr_idx) const {
+  if (opcode == Op_CallLeaf &&
+      (n->as_Call()->entry_point() == ZBarrierSetRuntime::load_barrier_on_oop_field_preloaded_addr() ||
+       n->as_Call()->entry_point() == ZBarrierSetRuntime::load_barrier_on_weak_oop_field_preloaded_addr())) {
+    mem_op = true;
+    mem_addr_idx = TypeFunc::Parms + 1;
+    return true;
+  }
+  return false;
+}
+
 // == Verification ==
 
 #ifdef ASSERT
@@ -1458,6 +1512,12 @@ static bool look_for_barrier(Node* n, bool post_parse, VectorSet& visited) {
   }
 
   return true;
+}
+
+void ZBarrierSetC2::verify_gc_barriers(Compile* compile, CompilePhase phase) const {
+  if (phase == BarrierSetC2::BeforeCodeGen) return;
+  bool post_parse = phase == BarrierSetC2::BeforeOptimize;
+  verify_gc_barriers(post_parse);
 }
 
 void ZBarrierSetC2::verify_gc_barriers(bool post_parse) const {
@@ -1538,3 +1598,44 @@ void ZBarrierSetC2::verify_gc_barriers(bool post_parse) const {
 }
 
 #endif
+
+bool ZBarrierSetC2::escape_add_to_con_graph(ConnectionGraph* conn_graph, PhaseGVN* gvn, Unique_Node_List* delayed_worklist, Node* n, uint opcode) const {
+  switch (opcode) {
+    case Op_LoadBarrierSlowReg:
+    case Op_LoadBarrierWeakSlowReg:
+      conn_graph->add_objload_to_connection_graph(n, delayed_worklist);
+      return true;
+    case Op_Proj:
+      if (n->as_Proj()->_con == LoadBarrierNode::Oop && n->in(0)->is_LoadBarrier()) {
+        conn_graph->add_local_var_and_edge(n, PointsToNode::NoEscape, n->in(0)->in(LoadBarrierNode::Oop),
+                                           delayed_worklist);
+        return true;
+      }
+    default:
+      break;
+  }
+  return false;
+}
+
+bool ZBarrierSetC2::escape_add_final_edges(ConnectionGraph* conn_graph, PhaseGVN* gvn, Node* n, uint opcode) const {
+  switch (opcode) {
+    case Op_LoadBarrierSlowReg:
+    case Op_LoadBarrierWeakSlowReg: {
+      const Type *t = gvn->type(n);
+      if (t->make_ptr() != NULL) {
+        Node *adr = n->in(MemNode::Address);
+        conn_graph->add_local_var_and_edge(n, PointsToNode::NoEscape, adr, NULL);
+        return true;
+      }
+    }
+    case Op_Proj: {
+      if (n->as_Proj()->_con == LoadBarrierNode::Oop && n->in(0)->is_LoadBarrier()) {
+        conn_graph->add_local_var_and_edge(n, PointsToNode::NoEscape, n->in(0)->in(LoadBarrierNode::Oop), NULL);
+        return true;
+      }
+    }
+    default:
+      break;
+  }
+  return false;
+}

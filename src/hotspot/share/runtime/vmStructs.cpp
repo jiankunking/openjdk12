@@ -259,12 +259,12 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   nonstatic_field(Klass,                       _java_mirror,                                  OopHandle)                             \
   nonstatic_field(Klass,                       _modifier_flags,                               jint)                                  \
   nonstatic_field(Klass,                       _super,                                        Klass*)                                \
-  nonstatic_field(Klass,                       _subklass,                                     Klass*)                                \
+  volatile_nonstatic_field(Klass,              _subklass,                                     Klass*)                                 \
   nonstatic_field(Klass,                       _layout_helper,                                jint)                                  \
   nonstatic_field(Klass,                       _name,                                         Symbol*)                               \
   nonstatic_field(Klass,                       _access_flags,                                 AccessFlags)                           \
   nonstatic_field(Klass,                       _prototype_header,                             markOop)                               \
-  nonstatic_field(Klass,                       _next_sibling,                                 Klass*)                                \
+  volatile_nonstatic_field(Klass,              _next_sibling,                                 Klass*)                                \
   nonstatic_field(Klass,                       _next_link,                                    Klass*)                                \
   nonstatic_field(Klass,                       _vtable_len,                                   int)                                   \
   nonstatic_field(Klass,                       _class_loader_data,                            ClassLoaderData*)                      \
@@ -404,6 +404,8 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   /* Memory */                                                                                                                       \
   /**********/                                                                                                                       \
                                                                                                                                      \
+     static_field(MetaspaceObj,                _shared_metaspace_base,                        void*)                                 \
+     static_field(MetaspaceObj,                _shared_metaspace_top,                         void*)                                 \
   nonstatic_field(ThreadLocalAllocBuffer,      _start,                                        HeapWord*)                             \
   nonstatic_field(ThreadLocalAllocBuffer,      _top,                                          HeapWord*)                             \
   nonstatic_field(ThreadLocalAllocBuffer,      _end,                                          HeapWord*)                             \
@@ -460,7 +462,6 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   /* SystemDictionary */                                                                                                             \
   /********************/                                                                                                             \
                                                                                                                                      \
-     static_field(SystemDictionary,            _shared_dictionary,                            Dictionary*)                           \
      static_field(SystemDictionary,            _system_loader_lock_obj,                       oop)                                   \
      static_field(SystemDictionary,            WK_KLASS(Object_klass),                        InstanceKlass*)                        \
      static_field(SystemDictionary,            WK_KLASS(String_klass),                        InstanceKlass*)                        \

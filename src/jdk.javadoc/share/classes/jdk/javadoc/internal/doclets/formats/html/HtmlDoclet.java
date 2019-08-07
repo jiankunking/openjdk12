@@ -139,19 +139,6 @@ public class HtmlDoclet extends AbstractDoclet {
         if (configuration.createtree) {
             TreeWriter.generate(configuration, classtree);
         }
-        if (configuration.createindex) {
-            configuration.buildSearchTagIndex();
-            if (configuration.splitindex) {
-                SplitIndexWriter.generate(configuration, indexbuilder);
-            } else {
-                SingleIndexWriter.generate(configuration, indexbuilder);
-            }
-            AllClassesIndexWriter.generate(configuration,
-                    new IndexBuilder(configuration, nodeprecated, true));
-            if (!configuration.packages.isEmpty()) {
-                AllPackagesIndexWriter.generate(configuration);
-            }
-        }
 
         if (!(configuration.nodeprecatedlist || nodeprecated)) {
             DeprecatedListWriter.generate(configuration);
@@ -169,6 +156,20 @@ public class HtmlDoclet extends AbstractDoclet {
                 ModuleIndexWriter.generate(configuration);
             } else {
                 PackageIndexWriter.generate(configuration);
+            }
+        }
+
+        if (configuration.createindex) {
+            configuration.buildSearchTagIndex();
+            if (configuration.splitindex) {
+                SplitIndexWriter.generate(configuration, indexbuilder);
+            } else {
+                SingleIndexWriter.generate(configuration, indexbuilder);
+            }
+            AllClassesIndexWriter.generate(configuration,
+                    new IndexBuilder(configuration, nodeprecated, true));
+            if (!configuration.packages.isEmpty()) {
+                AllPackagesIndexWriter.generate(configuration);
             }
         }
 
@@ -222,19 +223,17 @@ public class HtmlDoclet extends AbstractDoclet {
                 "jszip-utils/dist/jszip-utils.min.js",
                 "jszip-utils/dist/jszip-utils-ie.js",
                 "jszip-utils/dist/jszip-utils-ie.min.js",
-                "images/ui-bg_flat_0_aaaaaa_40x100.png",
+                "images/ui-bg_glass_65_dadada_1x400.png",
                 "images/ui-icons_454545_256x240.png",
                 "images/ui-bg_glass_95_fef1ec_1x400.png",
                 "images/ui-bg_glass_75_dadada_1x400.png",
                 "images/ui-bg_highlight-soft_75_cccccc_1x100.png",
                 "images/ui-icons_888888_256x240.png",
                 "images/ui-icons_2e83ff_256x240.png",
-                "images/ui-bg_glass_65_ffffff_1x400.png",
                 "images/ui-icons_cd0a0a_256x240.png",
                 "images/ui-bg_glass_55_fbf9ee_1x400.png",
                 "images/ui-icons_222222_256x240.png",
-                "images/ui-bg_glass_75_e6e6e6_1x400.png",
-                "images/ui-bg_flat_75_ffffff_40x100.png");
+                "images/ui-bg_glass_75_e6e6e6_1x400.png");
         DocFile f;
         for (String file : files) {
             DocPath filePath = DocPaths.JQUERY_FILES.resolve(file);

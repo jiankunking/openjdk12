@@ -52,8 +52,8 @@ import java.util.jar.Manifest;
 
 import jdk.internal.loader.Resource;
 import jdk.internal.loader.URLClassPath;
-import jdk.internal.misc.JavaNetURLClassLoaderAccess;
-import jdk.internal.misc.SharedSecrets;
+import jdk.internal.access.JavaNetURLClassLoaderAccess;
+import jdk.internal.access.SharedSecrets;
 import jdk.internal.perf.PerfCounter;
 import sun.net.www.ParseUtil;
 import sun.security.util.SecurityConstants;
@@ -743,7 +743,7 @@ public class URLClassLoader extends SecureClassLoader implements Closeable {
                 locUrl = ((JarURLConnection)urlConnection).getJarFileURL();
             }
             String host = locUrl.getHost();
-            if (host != null && (host.length() > 0))
+            if (host != null && !host.isEmpty())
                 p = new SocketPermission(host,
                                          SecurityConstants.SOCKET_CONNECT_ACCEPT_ACTION);
         }

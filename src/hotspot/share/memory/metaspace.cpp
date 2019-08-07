@@ -616,7 +616,7 @@ void MetaspaceUtils::print_report(outputStream* out, size_t scale, int flags) {
     out->cr();
   }
 
-  ClassLoaderDataGraph::cld_do(&cl); // collect data and optionally print
+  ClassLoaderDataGraph::loaded_cld_do(&cl); // collect data and optionally print
 
   // Print totals, broken up by space type.
   if (print_by_spacetype) {
@@ -865,6 +865,7 @@ void MetaspaceUtils::verify_metrics() {
 
 // Utils to check if a pointer or range is part of a committed metaspace region.
 metaspace::VirtualSpaceNode* MetaspaceUtils::find_enclosing_virtual_space(const void* p) {
+  MutexLockerEx cl(MetaspaceExpand_lock, Mutex::_no_safepoint_check_flag);
   VirtualSpaceNode* vsn = Metaspace::space_list()->find_enclosing_space(p);
   if (Metaspace::using_class_space() && vsn == NULL) {
     vsn = Metaspace::class_space_list()->find_enclosing_space(p);
@@ -1260,6 +1261,8 @@ size_t Metaspace::align_word_size_up(size_t word_size) {
 MetaWord* Metaspace::allocate(ClassLoaderData* loader_data, size_t word_size,
                               MetaspaceObj::Type type, TRAPS) {
   assert(!_frozen, "sanity");
+  assert(!(DumpSharedSpaces && THREAD->is_VM_thread()), "sanity");
+
   if (HAS_PENDING_EXCEPTION) {
     assert(false, "Should not allocate with exception pending");
     return NULL;  // caller does a CHECK_NULL too
@@ -1277,12 +1280,10 @@ MetaWord* Metaspace::allocate(ClassLoaderData* loader_data, size_t word_size,
     tracer()->report_metaspace_allocation_failure(loader_data, word_size, type, mdtype);
 
     // Allocation failed.
-    if (is_init_completed() && !(DumpSharedSpaces && THREAD->is_VM_thread())) {
+    if (is_init_completed()) {
       // Only start a GC if the bootstrapping has completed.
-      // Also, we cannot GC if we are at the end of the CDS dumping stage which runs inside
-      // the VM thread.
-
-      // Try to clean out some memory and retry.
+      // Try to clean out some heap memory and retry. This can prevent premature
+      // expansion of the metaspace.
       result = Universe::heap()->satisfy_failed_metadata_allocation(loader_data, word_size, mdtype);
     }
   }
@@ -1408,6 +1409,7 @@ ClassLoaderMetaspace::ClassLoaderMetaspace(Mutex* lock, Metaspace::MetaspaceType
 }
 
 ClassLoaderMetaspace::~ClassLoaderMetaspace() {
+  Metaspace::assert_not_frozen();
   DEBUG_ONLY(Atomic::inc(&g_internal_statistics.num_metaspace_deaths));
   delete _vsm;
   if (Metaspace::using_class_space()) {

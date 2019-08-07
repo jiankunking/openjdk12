@@ -1,6 +1,6 @@
 //
-// Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
-// Copyright (c) 2012, 2017 SAP SE. All rights reserved.
+// Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+// Copyright (c) 2012, 2018 SAP SE. All rights reserved.
 // DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 //
 // This code is free software; you can redistribute it and/or modify it
@@ -2209,9 +2209,13 @@ const bool Matcher::match_rule_supported(int opcode) {
     return VM_Version::has_fsqrt();
   case Op_CountLeadingZerosI:
   case Op_CountLeadingZerosL:
+    if (!UseCountLeadingZerosInstructionsPPC64)
+      return false;
+    break;
   case Op_CountTrailingZerosI:
   case Op_CountTrailingZerosL:
-    if (!UseCountLeadingZerosInstructionsPPC64)
+    if (!UseCountLeadingZerosInstructionsPPC64 &&
+        !UseCountTrailingZerosInstructionsPPC64)
       return false;
     break;
 
@@ -2253,6 +2257,14 @@ const bool Matcher::match_rule_supported(int opcode) {
     return SuperwordUseVSX;
   case Op_PopCountVI:
     return (SuperwordUseVSX && UsePopCountInstruction);
+  case Op_FmaVF:
+  case Op_FmaVD:
+    return (SuperwordUseVSX && UseFMA);
+  case Op_Digit:
+  case Op_LowerCase:
+  case Op_UpperCase:
+  case Op_Whitespace:
+    return UseCharacterCompareIntrinsics;
   }
 
   return true;  // Per default match rules are supported.
@@ -7629,7 +7641,7 @@ instruct cmovI_reg(cmpOp cmp, flagsRegSrc crx, iRegIdst dst, iRegIsrc src) %{
 
   format %{ "CMOVE   $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_reg(dst, crx, src, cmp) );
   ins_pipe(pipe_class_default);
 %}
@@ -7642,7 +7654,7 @@ instruct cmovI_imm(cmpOp cmp, flagsRegSrc crx, iRegIdst dst, immI16 src) %{
 
   format %{ "CMOVE   $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_imm(dst, crx, src, cmp) );
   ins_pipe(pipe_class_default);
 %}
@@ -7675,7 +7687,7 @@ instruct cmovL_reg(cmpOp cmp, flagsRegSrc crx, iRegLdst dst, iRegLsrc src) %{
 
   format %{ "CMOVE   $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_reg(dst, crx, src, cmp) );
   ins_pipe(pipe_class_default);
 %}
@@ -7688,7 +7700,7 @@ instruct cmovL_imm(cmpOp cmp, flagsRegSrc crx, iRegLdst dst, immL16 src) %{
 
   format %{ "CMOVE   $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_imm(dst, crx, src, cmp) );
   ins_pipe(pipe_class_default);
 %}
@@ -7722,7 +7734,7 @@ instruct cmovN_reg(cmpOp cmp, flagsRegSrc crx, iRegNdst dst, iRegNsrc src) %{
 
   format %{ "CMOVE   $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_reg(dst, crx, src, cmp) );
   ins_pipe(pipe_class_default);
 %}
@@ -7735,7 +7747,7 @@ instruct cmovN_imm(cmpOp cmp, flagsRegSrc crx, iRegNdst dst, immN_0 src) %{
 
   format %{ "CMOVE   $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_imm(dst, crx, src, cmp) );
   ins_pipe(pipe_class_default);
 %}
@@ -7768,7 +7780,7 @@ instruct cmovP_reg(cmpOp cmp, flagsRegSrc crx, iRegPdst dst, iRegP_N2P src) %{
 
   format %{ "CMOVE   $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_reg(dst, crx, src, cmp) );
   ins_pipe(pipe_class_default);
 %}
@@ -7781,7 +7793,7 @@ instruct cmovP_imm(cmpOp cmp, flagsRegSrc crx, iRegPdst dst, immP_0 src) %{
 
   format %{ "CMOVE   $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_imm(dst, crx, src, cmp) );
   ins_pipe(pipe_class_default);
 %}
@@ -7794,7 +7806,7 @@ instruct cmovF_reg(cmpOp cmp, flagsRegSrc crx, regF dst, regF src) %{
 
   format %{ "CMOVEF  $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT (InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT (InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8));
   ins_encode %{
     // TODO: PPC port $archOpcode(ppc64Opcode_cmovef);
     Label done;
@@ -7816,7 +7828,7 @@ instruct cmovD_reg(cmpOp cmp, flagsRegSrc crx, regD dst, regD src) %{
 
   format %{ "CMOVEF  $cmp, $crx, $dst, $src\n\t" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT (InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT (InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8));
   ins_encode %{
     // TODO: PPC port $archOpcode(ppc64Opcode_cmovef);
     Label done;
@@ -9277,7 +9289,7 @@ instruct cmovI_bne_negI_reg(iRegIdst dst, flagsRegSrc crx, iRegIsrc src1) %{
 
   format %{ "CMOVE   $dst, neg($src1), $crx" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT (InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT (InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8));
   ins_encode %{
     // TODO: PPC port $archOpcode(ppc64Opcode_cmove);
     Label done;
@@ -9340,7 +9352,7 @@ instruct cmovL_bne_negL_reg(iRegLdst dst, flagsRegSrc crx, iRegLsrc src1) %{
 
   format %{ "CMOVE   $dst, neg($src1), $crx" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT (InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT (InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8));
   ins_encode %{
     // TODO: PPC port $archOpcode(ppc64Opcode_cmove);
     Label done;
@@ -11114,7 +11126,7 @@ instruct cmovI_bso_stackSlotL(iRegIdst dst, flagsRegSrc crx, stackSlotL src) %{
 
   format %{ "cmovI   $crx, $dst, $src" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT(InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT(InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8));
   ins_encode( enc_cmove_bso_stackSlotL(dst, crx, src) );
   ins_pipe(pipe_class_default);
 %}
@@ -11128,7 +11140,7 @@ instruct cmovI_bso_reg(iRegIdst dst, flagsRegSrc crx, regD src) %{
 
   format %{ "cmovI   $crx, $dst, $src" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT(InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT(InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 12 : 8));
   ins_encode( enc_cmove_bso_reg(dst, crx, src) );
   ins_pipe(pipe_class_default);
 %}
@@ -11383,7 +11395,7 @@ instruct cmovL_bso_stackSlotL(iRegLdst dst, flagsRegSrc crx, stackSlotL src) %{
 
   format %{ "cmovL   $crx, $dst, $src" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_bso_stackSlotL(dst, crx, src) );
   ins_pipe(pipe_class_default);
 %}
@@ -11397,7 +11409,7 @@ instruct cmovL_bso_reg(iRegLdst dst, flagsRegSrc crx, regD src) %{
 
   format %{ "cmovL   $crx, $dst, $src" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8);
+  size((false /* TODO: PPC PORT Compile::current()->do_hb_scheduling()*/ ? 12 : 8));
   ins_encode( enc_cmove_bso_reg(dst, crx, src) );
   ins_pipe(pipe_class_default);
 %}
@@ -11890,7 +11902,7 @@ instruct cmovI_conIvalueMinus1_conIvalue1(iRegIdst dst, flagsRegSrc crx) %{
 
   format %{ "cmovI   $crx, $dst, -1, 0, +1" %}
   // Worst case is branch + move + branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORTInsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 20 : 16);
+  size((false /* TODO: PPC PORTInsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 20 : 16));
   ins_encode %{
     // TODO: PPC port $archOpcode(ppc64Opcode_cmove);
     Label done;
@@ -12229,7 +12241,7 @@ instruct cmov_bns_less(flagsReg crx) %{
 
   format %{ "cmov    $crx" %}
   // Worst case is branch + move + stop, no stop without scheduler.
-  size(false /* TODO: PPC PORT(InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 16 : 12);
+  size((false /* TODO: PPC PORT(InsertEndGroupPPC64 && Compile::current()->do_hb_scheduling())*/ ? 16 : 12));
   ins_encode %{
     // TODO: PPC port $archOpcode(ppc64Opcode_cmovecr);
     Label done;
@@ -12394,6 +12406,132 @@ instruct cmpD3_reg_reg_ExEx(iRegIdst dst, regD src1, regD src2) %{
     cmpDUnordered_reg_reg(tmp1, src1, src2);
     cmovI_conIvalueMinus1_conIvalue0_conIvalue1_Ex(dst, tmp1);
   %}
+%}
+
+// Compare char
+instruct cmprb_Digit_reg_reg(iRegIdst dst, iRegIsrc src1, iRegIsrc src2, flagsReg crx) %{
+  match(Set dst (Digit src1));
+  effect(TEMP src2, TEMP crx);
+  ins_cost(3 * DEFAULT_COST);
+
+  format %{ "LI      $src2, 0x3930\n\t"
+            "CMPRB   $crx, 0, $src1, $src2\n\t"
+            "SETB    $dst, $crx" %}
+  size(12);
+  ins_encode %{
+    // 0x30: 0, 0x39: 9
+    __ li($src2$$Register, 0x3930);
+    // compare src1 with ranges 0x30 to 0x39
+    __ cmprb($crx$$CondRegister, 0, $src1$$Register, $src2$$Register);
+    __ setb($dst$$Register, $crx$$CondRegister);
+  %}
+  ins_pipe(pipe_class_default);
+%}
+
+instruct cmprb_LowerCase_reg_reg(iRegIdst dst, iRegIsrc src1, iRegIsrc src2, flagsReg crx) %{
+  match(Set dst (LowerCase src1));
+  effect(TEMP src2, TEMP crx);
+  ins_cost(12 * DEFAULT_COST);
+
+  format %{ "LI      $src2, 0x7A61\n\t"
+            "CMPRB   $crx, 0, $src1, $src2\n\t"
+            "BGT     $crx, done\n\t"
+            "LIS     $src2, (signed short)0xF6DF\n\t"
+            "ORI     $src2, $src2, 0xFFF8\n\t"
+            "CMPRB   $crx, 1, $src1, $src2\n\t"
+            "BGT     $crx, done\n\t"
+            "LIS     $src2, (signed short)0xAAB5\n\t"
+            "ORI     $src2, $src2, 0xBABA\n\t"
+            "INSRDI  $src2, $src2, 32, 0\n\t"
+            "CMPEQB  $crx, 1, $src1, $src2\n"
+            "done:\n\t"
+            "SETB    $dst, $crx" %}
+
+  size(48);
+  ins_encode %{
+    Label done;
+    // 0x61: a, 0x7A: z
+    __ li($src2$$Register, 0x7A61);
+    // compare src1 with ranges 0x61 to 0x7A
+    __ cmprb($crx$$CondRegister, 0, $src1$$Register, $src2$$Register);
+    __ bgt($crx$$CondRegister, done);
+
+    // 0xDF: sharp s, 0xFF: y with diaeresis, 0xF7 is not the lower case
+    __ lis($src2$$Register, (signed short)0xF6DF);
+    __ ori($src2$$Register, $src2$$Register, 0xFFF8);
+    // compare src1 with ranges 0xDF to 0xF6 and 0xF8 to 0xFF
+    __ cmprb($crx$$CondRegister, 1, $src1$$Register, $src2$$Register);
+    __ bgt($crx$$CondRegister, done);
+
+    // 0xAA: feminine ordinal indicator
+    // 0xB5: micro sign
+    // 0xBA: masculine ordinal indicator
+    __ lis($src2$$Register, (signed short)0xAAB5);
+    __ ori($src2$$Register, $src2$$Register, 0xBABA);
+    __ insrdi($src2$$Register, $src2$$Register, 32, 0);
+    // compare src1 with 0xAA, 0xB5, and 0xBA
+    __ cmpeqb($crx$$CondRegister, $src1$$Register, $src2$$Register);
+
+    __ bind(done);
+    __ setb($dst$$Register, $crx$$CondRegister);
+  %}
+  ins_pipe(pipe_class_default);
+%}
+
+instruct cmprb_UpperCase_reg_reg(iRegIdst dst, iRegIsrc src1, iRegIsrc src2, flagsReg crx) %{
+  match(Set dst (UpperCase src1));
+  effect(TEMP src2, TEMP crx);
+  ins_cost(7 * DEFAULT_COST);
+
+  format %{ "LI      $src2, 0x5A41\n\t"
+            "CMPRB   $crx, 0, $src1, $src2\n\t"
+            "BGT     $crx, done\n\t"
+            "LIS     $src2, (signed short)0xD6C0\n\t"
+            "ORI     $src2, $src2, 0xDED8\n\t"
+            "CMPRB   $crx, 1, $src1, $src2\n"
+            "done:\n\t"
+            "SETB    $dst, $crx" %}
+
+  size(28);
+  ins_encode %{
+    Label done;
+    // 0x41: A, 0x5A: Z
+    __ li($src2$$Register, 0x5A41);
+    // compare src1 with a range 0x41 to 0x5A
+    __ cmprb($crx$$CondRegister, 0, $src1$$Register, $src2$$Register);
+    __ bgt($crx$$CondRegister, done);
+
+    // 0xC0: a with grave, 0xDE: thorn, 0xD7 is not the upper case
+    __ lis($src2$$Register, (signed short)0xD6C0);
+    __ ori($src2$$Register, $src2$$Register, 0xDED8);
+    // compare src1 with ranges 0xC0 to 0xD6 and 0xD8 to 0xDE
+    __ cmprb($crx$$CondRegister, 1, $src1$$Register, $src2$$Register);
+
+    __ bind(done);
+    __ setb($dst$$Register, $crx$$CondRegister);
+  %}
+  ins_pipe(pipe_class_default);
+%}
+
+instruct cmprb_Whitespace_reg_reg(iRegIdst dst, iRegIsrc src1, iRegIsrc src2, flagsReg crx) %{
+  match(Set dst (Whitespace src1));
+  effect(TEMP src2, TEMP crx);
+  ins_cost(4 * DEFAULT_COST);
+
+  format %{ "LI      $src2, 0x0D09\n\t"
+            "ADDIS   $src2, 0x201C\n\t"
+            "CMPRB   $crx, 1, $src1, $src2\n\t"
+            "SETB    $dst, $crx" %}
+  size(16);
+  ins_encode %{
+    // 0x09 to 0x0D, 0x1C to 0x20
+    __ li($src2$$Register, 0x0D09);
+    __ addis($src2$$Register, $src2$$Register, 0x0201C);
+    // compare src with ranges 0x09 to 0x0D and 0x1C to 0x20
+    __ cmprb($crx$$CondRegister, 1, $src1$$Register, $src2$$Register);
+    __ setb($dst$$Register, $crx$$CondRegister);
+  %}
+  ins_pipe(pipe_class_default);
 %}
 
 //----------Branches---------------------------------------------------------
@@ -13425,7 +13563,7 @@ instruct countLeadingZerosP(iRegIdst dst, iRegPsrc src) %{
 
 instruct countTrailingZerosI_Ex(iRegIdst dst, iRegIsrc src) %{
   match(Set dst (CountTrailingZerosI src));
-  predicate(UseCountLeadingZerosInstructionsPPC64);
+  predicate(UseCountLeadingZerosInstructionsPPC64 && !UseCountTrailingZerosInstructionsPPC64);
   ins_cost(DEFAULT_COST);
 
   expand %{
@@ -13442,9 +13580,22 @@ instruct countTrailingZerosI_Ex(iRegIdst dst, iRegIsrc src) %{
   %}
 %}
 
+instruct countTrailingZerosI_cnttzw(iRegIdst dst, iRegIsrc src) %{
+  match(Set dst (CountTrailingZerosI src));
+  predicate(UseCountTrailingZerosInstructionsPPC64);
+  ins_cost(DEFAULT_COST);
+
+  format %{ "CNTTZW  $dst, $src" %}
+  size(4);
+  ins_encode %{
+    __ cnttzw($dst$$Register, $src$$Register);
+  %}
+  ins_pipe(pipe_class_default);
+%}
+
 instruct countTrailingZerosL_Ex(iRegIdst dst, iRegLsrc src) %{
   match(Set dst (CountTrailingZerosL src));
-  predicate(UseCountLeadingZerosInstructionsPPC64);
+  predicate(UseCountLeadingZerosInstructionsPPC64 && !UseCountTrailingZerosInstructionsPPC64);
   ins_cost(DEFAULT_COST);
 
   expand %{
@@ -13458,6 +13609,19 @@ instruct countTrailingZerosL_Ex(iRegIdst dst, iRegLsrc src) %{
     countLeadingZerosL(tmpL3, tmpL2);
     subI_imm16_reg(dst, imm2, tmpL3);
  %}
+%}
+
+instruct countTrailingZerosL_cnttzd(iRegIdst dst, iRegLsrc src) %{
+  match(Set dst (CountTrailingZerosL src));
+  predicate(UseCountTrailingZerosInstructionsPPC64);
+  ins_cost(DEFAULT_COST);
+
+  format %{ "CNTTZD  $dst, $src" %}
+  size(4);
+  ins_encode %{
+    __ cnttzd($dst$$Register, $src$$Register);
+  %}
+  ins_pipe(pipe_class_default);
 %}
 
 // Expand nodes for byte_reverse_int.
@@ -14314,6 +14478,92 @@ instruct vpopcnt4I_reg(vecX dst, vecX src) %{
   ins_pipe(pipe_class_default);
 %}
 
+// --------------------------------- FMA --------------------------------------
+// dst + src1 * src2
+instruct vfma4F(vecX dst, vecX src1, vecX src2) %{
+  match(Set dst (FmaVF dst (Binary src1 src2)));
+  predicate(n->as_Vector()->length() == 4);
+
+  format %{ "XVMADDASP   $dst, $src1, $src2" %}
+
+  size(4);
+  ins_encode %{
+    __ xvmaddasp($dst$$VectorSRegister, $src1$$VectorSRegister, $src2$$VectorSRegister);
+  %}
+  ins_pipe(pipe_class_default);
+%}
+
+// dst - src1 * src2
+instruct vfma4F_neg1(vecX dst, vecX src1, vecX src2) %{
+  match(Set dst (FmaVF dst (Binary (NegVF src1) src2)));
+  match(Set dst (FmaVF dst (Binary src1 (NegVF src2))));
+  predicate(n->as_Vector()->length() == 4);
+
+  format %{ "XVNMSUBASP   $dst, $src1, $src2" %}
+
+  size(4);
+  ins_encode %{
+    __ xvnmsubasp($dst$$VectorSRegister, $src1$$VectorSRegister, $src2$$VectorSRegister);
+  %}
+  ins_pipe(pipe_class_default);
+%}
+
+// - dst + src1 * src2
+instruct vfma4F_neg2(vecX dst, vecX src1, vecX src2) %{
+  match(Set dst (FmaVF (NegVF dst) (Binary src1 src2)));
+  predicate(n->as_Vector()->length() == 4);
+
+  format %{ "XVMSUBASP   $dst, $src1, $src2" %}
+
+  size(4);
+  ins_encode %{
+    __ xvmsubasp($dst$$VectorSRegister, $src1$$VectorSRegister, $src2$$VectorSRegister);
+  %}
+  ins_pipe(pipe_class_default);
+%}
+
+// dst + src1 * src2
+instruct vfma2D(vecX dst, vecX src1, vecX src2) %{
+  match(Set dst (FmaVD  dst (Binary src1 src2)));
+  predicate(n->as_Vector()->length() == 2);
+
+  format %{ "XVMADDADP   $dst, $src1, $src2" %}
+
+  size(4);
+  ins_encode %{
+    __ xvmaddadp($dst$$VectorSRegister, $src1$$VectorSRegister, $src2$$VectorSRegister);
+  %}
+  ins_pipe(pipe_class_default);
+%}
+
+// dst - src1 * src2
+instruct vfma2D_neg1(vecX dst, vecX src1, vecX src2) %{
+  match(Set dst (FmaVD  dst (Binary (NegVD src1) src2)));
+  match(Set dst (FmaVD  dst (Binary src1 (NegVD src2))));
+  predicate(n->as_Vector()->length() == 2);
+
+  format %{ "XVNMSUBADP   $dst, $src1, $src2" %}
+
+  size(4);
+  ins_encode %{
+    __ xvnmsubadp($dst$$VectorSRegister, $src1$$VectorSRegister, $src2$$VectorSRegister);
+  %}
+  ins_pipe(pipe_class_default);
+%}
+
+// - dst + src1 * src2
+instruct vfma2D_neg2(vecX dst, vecX src1, vecX src2) %{
+  match(Set dst (FmaVD (NegVD dst) (Binary src1 src2)));
+  predicate(n->as_Vector()->length() == 2);
+
+  format %{ "XVMSUBADP   $dst, $src1, $src2" %}
+
+  size(4);
+  ins_encode %{
+    __ xvmsubadp($dst$$VectorSRegister, $src1$$VectorSRegister, $src2$$VectorSRegister);
+  %}
+  ins_pipe(pipe_class_default);
+%}
 
 //----------Overflow Math Instructions-----------------------------------------
 

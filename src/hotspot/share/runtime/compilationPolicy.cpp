@@ -42,7 +42,7 @@
 #include "runtime/tieredThresholdPolicy.hpp"
 #include "runtime/timer.hpp"
 #include "runtime/vframe.hpp"
-#include "runtime/vm_operations.hpp"
+#include "runtime/vmOperations.hpp"
 #include "utilities/events.hpp"
 #include "utilities/globalDefinitions.hpp"
 
@@ -228,7 +228,7 @@ void NonTieredCompPolicy::initialize() {
     // Example: if CICompilerCountPerCPU is true, then we get
     // max(log2(8)-1,1) = 2 compiler threads on an 8-way machine.
     // May help big-app startup time.
-    _compiler_count = MAX2(log2_intptr(os::active_processor_count())-1,1);
+    _compiler_count = MAX2(log2_int(os::active_processor_count())-1,1);
     // Make sure there is enough space in the code cache to hold all the compiler buffers
     size_t buffer_size = 1;
 #ifdef COMPILER1
@@ -420,7 +420,7 @@ nmethod* NonTieredCompPolicy::event(const methodHandle& method, const methodHand
       return NULL;
     }
   }
-  if (CompileTheWorld || ReplayCompiles) {
+  if (ReplayCompiles) {
     // Don't trigger other compiles in testing mode
     if (bci == InvocationEntryBci) {
       reset_counter_for_invocation_event(method);

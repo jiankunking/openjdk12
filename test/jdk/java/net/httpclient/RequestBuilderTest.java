@@ -107,7 +107,6 @@ public class RequestBuilderTest {
                 URI.create("ws://foo.com"),
                 URI.create("wss://foo.com"),
                 URI.create("ftp://foo.com"),
-                URI.create("gopher://foo.com"),
                 URI.create("mailto:a@b.com"),
                 URI.create("scheme:example.com"),
                 URI.create("scheme:example.com"),
@@ -339,7 +338,7 @@ public class RequestBuilderTest {
 
     // headers that are allowed now, but weren't before
     private static final Set<String> FORMERLY_RESTRICTED = Set.of("referer", "origin",
-            "OriGin", "Referer");
+            "OriGin", "Referer", "Date", "via", "WarnIng");
 
     @Test
     public void testFormerlyRestricted()  throws URISyntaxException {
@@ -354,14 +353,9 @@ public class RequestBuilderTest {
     }
 
     private static final Set<String> RESTRICTED = Set.of("connection", "content-length",
-            "date", "expect", "from", "host",
-            "upgrade", "via", "warning",
-            "Connection", "Content-Length",
-            "DATE", "eXpect", "frOm", "hosT",
-            "upgradE", "vIa", "Warning",
-            "CONNection", "CONTENT-LENGTH",
-            "Date", "EXPECT", "From", "Host",
-            "Upgrade", "Via", "WARNING");
+            "expect", "host", "upgrade", "Connection", "Content-Length",
+            "eXpect", "hosT", "upgradE", "CONNection", "CONTENT-LENGTH",
+            "EXPECT", "Host", "Upgrade");
 
     interface WithHeader {
         HttpRequest.Builder withHeader(HttpRequest.Builder builder, String name, String value);

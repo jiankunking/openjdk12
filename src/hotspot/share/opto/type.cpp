@@ -2960,7 +2960,7 @@ TypeOopPtr::TypeOopPtr(TYPES t, PTR ptr, ciKlass* k, bool xk, ciObject* o, int o
     _is_ptr_to_boxed_value = k->as_instance_klass()->is_boxed_value_offset(offset);
   }
 #ifdef _LP64
-  if (_offset != 0) {
+  if (_offset > 0 || _offset == Type::OffsetTop || _offset == Type::OffsetBot) {
     if (_offset == oopDesc::klass_offset_in_bytes()) {
       _is_ptr_to_narrowklass = UseCompressedClassPointers;
     } else if (klass() == NULL) {
@@ -3041,6 +3041,10 @@ const Type *TypeOopPtr::cast_to_ptr_type(PTR ptr) const {
 const TypeOopPtr *TypeOopPtr::cast_to_instance_id(int instance_id) const {
   // There are no instances of a general oop.
   // Return self unchanged.
+  return this;
+}
+
+const TypeOopPtr *TypeOopPtr::cast_to_nonconst() const {
   return this;
 }
 
@@ -3544,6 +3548,11 @@ const Type *TypeInstPtr::cast_to_exactness(bool klass_is_exact) const {
 const TypeOopPtr *TypeInstPtr::cast_to_instance_id(int instance_id) const {
   if( instance_id == _instance_id ) return this;
   return make(_ptr, klass(), _klass_is_exact, const_oop(), _offset, instance_id, _speculative, _inline_depth);
+}
+
+const TypeOopPtr *TypeInstPtr::cast_to_nonconst() const {
+  if (const_oop() == NULL) return this;
+  return make(NotNull, klass(), _klass_is_exact, NULL, _offset, _instance_id, _speculative, _inline_depth);
 }
 
 //------------------------------xmeet_unloaded---------------------------------
@@ -4072,6 +4081,12 @@ const TypeOopPtr *TypeAryPtr::cast_to_instance_id(int instance_id) const {
   if( instance_id == _instance_id ) return this;
   return make(_ptr, const_oop(), _ary, klass(), _klass_is_exact, _offset, instance_id, _speculative, _inline_depth);
 }
+
+const TypeOopPtr *TypeAryPtr::cast_to_nonconst() const {
+  if (const_oop() == NULL) return this;
+  return make(NotNull, NULL, _ary, klass(), _klass_is_exact, _offset, _instance_id, _speculative, _inline_depth);
+}
+
 
 //-----------------------------narrow_size_type-------------------------------
 // Local cache for arrayOopDesc::max_array_length(etype),

@@ -76,9 +76,6 @@
 #include "utilities/align.hpp"
 #include "utilities/copy.hpp"
 #include "utilities/macros.hpp"
-#if INCLUDE_G1GC
-#include "gc/g1/g1ThreadLocalData.hpp"
-#endif // INCLUDE_G1GC
 #if INCLUDE_ZGC
 #include "gc/z/c2/zBarrierSetC2.hpp"
 #endif
@@ -892,7 +889,10 @@ Compile::Compile( ciEnv* ci_env, C2Compiler* compiler, ciMethod* target, int osr
   }
 #endif
 
-  NOT_PRODUCT( verify_barriers(); )
+#ifdef ASSERT
+  BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
+  bs->verify_gc_barriers(this, BarrierSetC2::BeforeCodeGen);
+#endif
 
   // Dump compilation data to replay it.
   if (directive->DumpReplayOption) {
@@ -1122,7 +1122,7 @@ void Compile::Init(int aliaslevel) {
   set_decompile_count(0);
 
   set_do_freq_based_layout(_directive->BlockLayoutByFrequencyOption);
-  set_num_loop_opts(LoopOptsCount);
+  _loop_opts_cnt = LoopOptsCount;
   set_do_inlining(Inline);
   set_max_inline_size(MaxInlineSize);
   set_freq_inline_size(FreqInlineSize);
@@ -1465,6 +1465,8 @@ const TypePtr *Compile::flatten_alias_type( const TypePtr *tj ) const {
         tj = TypeInstPtr::MARK;
         ta = TypeAryPtr::RANGE; // generic ignored junk
         ptr = TypePtr::BotPTR;
+      } else if (BarrierSet::barrier_set()->barrier_set_c2()->flatten_gc_alias_type(tj)) {
+        ta = tj->isa_aryptr();
       } else {                  // Random constant offset into array body
         offset = Type::OffsetBot;   // Flatten constant access into array body
         tj = ta = TypeAryPtr::make(ptr,ta->ary(),ta->klass(),false,offset);
@@ -1529,6 +1531,8 @@ const TypePtr *Compile::flatten_alias_type( const TypePtr *tj ) const {
       if (!is_known_inst) { // Do it only for non-instance types
         tj = to = TypeInstPtr::make(TypePtr::BotPTR, env()->Object_klass(), false, NULL, offset);
       }
+    } else if (BarrierSet::barrier_set()->barrier_set_c2()->flatten_gc_alias_type(tj)) {
+      to = tj->is_instptr();
     } else if (offset < 0 || offset >= k->size_helper() * wordSize) {
       // Static fields are in the space above the normal instance
       // fields in the java.lang.Class instance.
@@ -1627,7 +1631,8 @@ const TypePtr *Compile::flatten_alias_type( const TypePtr *tj ) const {
           (offset == Type::OffsetBot && tj == TypePtr::BOTTOM) ||
           (offset == oopDesc::mark_offset_in_bytes() && tj->base() == Type::AryPtr) ||
           (offset == oopDesc::klass_offset_in_bytes() && tj->base() == Type::AryPtr) ||
-          (offset == arrayOopDesc::length_offset_in_bytes() && tj->base() == Type::AryPtr)  ,
+          (offset == arrayOopDesc::length_offset_in_bytes() && tj->base() == Type::AryPtr) ||
+          (BarrierSet::barrier_set()->barrier_set_c2()->verify_gc_alias_type(tj, offset)),
           "For oops, klasses, raw offset must be constant; for arrays the offset is never known" );
   assert( tj->ptr() != TypePtr::TopPTR &&
           tj->ptr() != TypePtr::AnyNull &&
@@ -2164,19 +2169,39 @@ void Compile::inline_incrementally(PhaseIterGVN& igvn) {
 }
 
 
-bool Compile::optimize_loops(int& loop_opts_cnt, PhaseIterGVN& igvn, LoopOptsMode mode) {
-  if(loop_opts_cnt > 0) {
+bool Compile::optimize_loops(PhaseIterGVN& igvn, LoopOptsMode mode) {
+  if(_loop_opts_cnt > 0) {
     debug_only( int cnt = 0; );
-    while(major_progress() && (loop_opts_cnt > 0)) {
+    while(major_progress() && (_loop_opts_cnt > 0)) {
       TracePhase tp("idealLoop", &timers[_t_idealLoop]);
       assert( cnt++ < 40, "infinite cycle in loop optimization" );
       PhaseIdealLoop ideal_loop(igvn, mode);
-      loop_opts_cnt--;
+      _loop_opts_cnt--;
       if (failing())  return false;
       if (major_progress()) print_method(PHASE_PHASEIDEALLOOP_ITERATIONS, 2);
     }
   }
   return true;
+}
+
+// Remove edges from "root" to each SafePoint at a backward branch.
+// They were inserted during parsing (see add_safepoint()) to make
+// infinite loops without calls or exceptions visible to root, i.e.,
+// useful.
+void Compile::remove_root_to_sfpts_edges(PhaseIterGVN& igvn) {
+  Node *r = root();
+  if (r != NULL) {
+    for (uint i = r->req(); i < r->len(); ++i) {
+      Node *n = r->in(i);
+      if (n != NULL && n->is_SafePoint()) {
+        r->rm_prec(i);
+        if (n->outcnt() == 0) {
+          igvn.remove_dead_node(n);
+        }
+        --i;
+      }
+    }
+  }
 }
 
 //------------------------------Optimize---------------------------------------
@@ -2193,11 +2218,10 @@ void Compile::Optimize() {
 
 #ifdef ASSERT
   BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
-  bs->verify_gc_barriers(true);
+  bs->verify_gc_barriers(this, BarrierSetC2::BeforeOptimize);
 #endif
 
   ResourceMark rm;
-  int          loop_opts_cnt;
 
   print_inlining_reinit();
 
@@ -2239,6 +2263,10 @@ void Compile::Optimize() {
 
     if (failing())  return;
   }
+
+  // Now that all inlining is over, cut edge from root to loop
+  // safepoints
+  remove_root_to_sfpts_edges(igvn);
 
   // Remove the speculative part of types and clean up the graph from
   // the extra CastPP nodes whose only purpose is to carry them. Do
@@ -2300,28 +2328,27 @@ void Compile::Optimize() {
   // peeling, unrolling, etc.
 
   // Set loop opts counter
-  loop_opts_cnt = num_loop_opts();
-  if((loop_opts_cnt > 0) && (has_loops() || has_split_ifs())) {
+  if((_loop_opts_cnt > 0) && (has_loops() || has_split_ifs())) {
     {
       TracePhase tp("idealLoop", &timers[_t_idealLoop]);
       PhaseIdealLoop ideal_loop(igvn, LoopOptsDefault);
-      loop_opts_cnt--;
+      _loop_opts_cnt--;
       if (major_progress()) print_method(PHASE_PHASEIDEALLOOP1, 2);
       if (failing())  return;
     }
     // Loop opts pass if partial peeling occurred in previous pass
-    if(PartialPeelLoop && major_progress() && (loop_opts_cnt > 0)) {
+    if(PartialPeelLoop && major_progress() && (_loop_opts_cnt > 0)) {
       TracePhase tp("idealLoop", &timers[_t_idealLoop]);
       PhaseIdealLoop ideal_loop(igvn, LoopOptsSkipSplitIf);
-      loop_opts_cnt--;
+      _loop_opts_cnt--;
       if (major_progress()) print_method(PHASE_PHASEIDEALLOOP2, 2);
       if (failing())  return;
     }
     // Loop opts pass for loop-unrolling before CCP
-    if(major_progress() && (loop_opts_cnt > 0)) {
+    if(major_progress() && (_loop_opts_cnt > 0)) {
       TracePhase tp("idealLoop", &timers[_t_idealLoop]);
       PhaseIdealLoop ideal_loop(igvn, LoopOptsSkipSplitIf);
-      loop_opts_cnt--;
+      _loop_opts_cnt--;
       if (major_progress()) print_method(PHASE_PHASEIDEALLOOP3, 2);
     }
     if (!failing()) {
@@ -2356,7 +2383,7 @@ void Compile::Optimize() {
 
   // Loop transforms on the ideal graph.  Range Check Elimination,
   // peeling, unrolling, etc.
-  if (!optimize_loops(loop_opts_cnt, igvn, LoopOptsDefault)) {
+  if (!optimize_loops(igvn, LoopOptsDefault)) {
     return;
   }
 
@@ -2386,7 +2413,7 @@ void Compile::Optimize() {
 
 #ifdef ASSERT
   BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
-  bs->verify_gc_barriers(false);
+  bs->verify_gc_barriers(this, BarrierSetC2::BeforeExpand);
 #endif
 
   {
@@ -2394,6 +2421,16 @@ void Compile::Optimize() {
     PhaseMacroExpand  mex(igvn);
     print_method(PHASE_BEFORE_MACRO_EXPANSION, 2);
     if (mex.expand_macro_nodes()) {
+      assert(failing(), "must bail out w/ explicit message");
+      return;
+    }
+  }
+
+  {
+    TracePhase tp("barrierExpand", &timers[_t_barrierExpand]);
+    print_method(PHASE_BEFORE_BARRIER_EXPAND, 2);
+    BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
+    if (bs->expand_barriers(this, igvn)) {
       assert(failing(), "must bail out w/ explicit message");
       return;
     }
@@ -2787,6 +2824,18 @@ void Compile::final_graph_reshaping_impl( Node *n, Final_Reshape_Counts &frc) {
   }
 #endif
   // Count FPU ops and common calls, implements item (3)
+  bool gc_handled = BarrierSet::barrier_set()->barrier_set_c2()->final_graph_reshaping(this, n, nop);
+  if (!gc_handled) {
+    final_graph_reshaping_main_switch(n, frc, nop);
+  }
+
+  // Collect CFG split points
+  if (n->is_MultiBranch() && !n->is_RangeCheck()) {
+    frc._tests.push(n);
+  }
+}
+
+void Compile::final_graph_reshaping_main_switch(Node* n, Final_Reshape_Counts& frc, uint nop) {
   switch( nop ) {
   // Count all float operations that may use FPU
   case Op_AddF:
@@ -2933,18 +2982,13 @@ void Compile::final_graph_reshaping_impl( Node *n, Final_Reshape_Counts &frc) {
   case Op_LoadL_unaligned:
   case Op_LoadPLocked:
   case Op_LoadP:
-#if INCLUDE_ZGC
-  case Op_LoadBarrierSlowReg:
-  case Op_LoadBarrierWeakSlowReg:
-#endif
   case Op_LoadN:
   case Op_LoadRange:
   case Op_LoadS: {
   handle_mem:
 #ifdef ASSERT
     if( VerifyOptoOopOffsets ) {
-      assert( n->is_Mem(), "" );
-      MemNode *mem  = (MemNode*)n;
+      MemNode* mem  = n->as_Mem();
       // Check to see if address types have grounded out somehow.
       const TypeInstPtr *tp = mem->in(MemNode::Address)->bottom_type()->isa_instptr();
       assert( !tp || oop_offset_is_sane(tp), "" );
@@ -3041,7 +3085,7 @@ void Compile::final_graph_reshaping_impl( Node *n, Final_Reshape_Counts &frc) {
         Node *m = wq.at(next);
         for (DUIterator_Fast imax, i = m->fast_outs(imax); i < imax; i++) {
           Node* use = m->fast_out(i);
-          if (use->is_Mem() || use->is_EncodeNarrowPtr()) {
+          if (use->is_Mem() || use->is_EncodeNarrowPtr() || use->is_ShenandoahBarrier()) {
             use->ensure_control_or_add_prec(n->in(0));
           } else {
             switch(use->Opcode()) {
@@ -3228,8 +3272,10 @@ void Compile::final_graph_reshaping_impl( Node *n, Final_Reshape_Counts &frc) {
             break;
           }
         }
-        assert(proj != NULL, "must be found");
-        p->subsume_by(proj, this);
+        assert(proj != NULL || p->_con == TypeFunc::I_O, "io may be dropped at an infinite loop");
+        if (proj != NULL) {
+          p->subsume_by(proj, this);
+        }
       }
     }
     break;
@@ -3449,8 +3495,7 @@ void Compile::final_graph_reshaping_impl( Node *n, Final_Reshape_Counts &frc) {
   }
   case Op_CmpUL: {
     if (!Matcher::has_match_rule(Op_CmpUL)) {
-      // We don't support unsigned long comparisons. Set 'max_idx_expr'
-      // to max_julong if < 0 to make the signed comparison fail.
+      // No support for unsigned long comparisons
       ConINode* sign_pos = new ConINode(TypeInt::make(BitsPerLong - 1));
       Node* sign_bit_mask = new RShiftLNode(n->in(1), sign_pos);
       Node* orl = new OrLNode(n->in(1), sign_bit_mask);
@@ -3462,15 +3507,10 @@ void Compile::final_graph_reshaping_impl( Node *n, Final_Reshape_Counts &frc) {
     break;
   }
   default:
-    assert( !n->is_Call(), "" );
-    assert( !n->is_Mem(), "" );
-    assert( nop != Op_ProfileBoolean, "should be eliminated during IGVN");
+    assert(!n->is_Call(), "");
+    assert(!n->is_Mem(), "");
+    assert(nop != Op_ProfileBoolean, "should be eliminated during IGVN");
     break;
-  }
-
-  // Collect CFG split points
-  if (n->is_MultiBranch() && !n->is_RangeCheck()) {
-    frc._tests.push(n);
   }
 }
 
@@ -3831,74 +3871,6 @@ void Compile::verify_graph_edges(bool no_dead_code) {
     }
   }
 }
-
-// Verify GC barriers consistency
-// Currently supported:
-// - G1 pre-barriers (see GraphKit::g1_write_barrier_pre())
-void Compile::verify_barriers() {
-#if INCLUDE_G1GC
-  if (UseG1GC) {
-    // Verify G1 pre-barriers
-    const int marking_offset = in_bytes(G1ThreadLocalData::satb_mark_queue_active_offset());
-
-    ResourceArea *area = Thread::current()->resource_area();
-    Unique_Node_List visited(area);
-    Node_List worklist(area);
-    // We're going to walk control flow backwards starting from the Root
-    worklist.push(_root);
-    while (worklist.size() > 0) {
-      Node* x = worklist.pop();
-      if (x == NULL || x == top()) continue;
-      if (visited.member(x)) {
-        continue;
-      } else {
-        visited.push(x);
-      }
-
-      if (x->is_Region()) {
-        for (uint i = 1; i < x->req(); i++) {
-          worklist.push(x->in(i));
-        }
-      } else {
-        worklist.push(x->in(0));
-        // We are looking for the pattern:
-        //                            /->ThreadLocal
-        // If->Bool->CmpI->LoadB->AddP->ConL(marking_offset)
-        //              \->ConI(0)
-        // We want to verify that the If and the LoadB have the same control
-        // See GraphKit::g1_write_barrier_pre()
-        if (x->is_If()) {
-          IfNode *iff = x->as_If();
-          if (iff->in(1)->is_Bool() && iff->in(1)->in(1)->is_Cmp()) {
-            CmpNode *cmp = iff->in(1)->in(1)->as_Cmp();
-            if (cmp->Opcode() == Op_CmpI && cmp->in(2)->is_Con() && cmp->in(2)->bottom_type()->is_int()->get_con() == 0
-                && cmp->in(1)->is_Load()) {
-              LoadNode* load = cmp->in(1)->as_Load();
-              if (load->Opcode() == Op_LoadB && load->in(2)->is_AddP() && load->in(2)->in(2)->Opcode() == Op_ThreadLocal
-                  && load->in(2)->in(3)->is_Con()
-                  && load->in(2)->in(3)->bottom_type()->is_intptr_t()->get_con() == marking_offset) {
-
-                Node* if_ctrl = iff->in(0);
-                Node* load_ctrl = load->in(0);
-
-                if (if_ctrl != load_ctrl) {
-                  // Skip possible CProj->NeverBranch in infinite loops
-                  if ((if_ctrl->is_Proj() && if_ctrl->Opcode() == Op_CProj)
-                      && (if_ctrl->in(0)->is_MultiBranch() && if_ctrl->in(0)->Opcode() == Op_NeverBranch)) {
-                    if_ctrl = if_ctrl->in(0)->in(0);
-                  }
-                }
-                assert(load_ctrl != NULL && if_ctrl == load_ctrl, "controls must match");
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-#endif
-}
-
 #endif
 
 // The Compile object keeps track of failure reasons separately from the ciEnv.

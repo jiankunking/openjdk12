@@ -37,6 +37,7 @@
 #include "opto/node.hpp"
 #include "opto/opcodes.hpp"
 #include "opto/regmask.hpp"
+#include "opto/rootnode.hpp"
 #include "opto/type.hpp"
 #include "utilities/copy.hpp"
 #include "utilities/macros.hpp"
@@ -899,13 +900,6 @@ Node* Node::uncast() const {
     return (Node*) this;
 }
 
-bool Node::eqv_uncast(const Node* n) const {
-  BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
-  Node* obj1 = bs->step_over_gc_barrier(const_cast<Node*>(this));
-  Node* obj2 = bs->step_over_gc_barrier(const_cast<Node*>(n));
-  return (obj1->uncast() == obj2->uncast());
-}
-
 // Find out of current node that matches opcode.
 Node* Node::find_out_with(int opcode) {
   for (DUIterator_Fast imax, i = fast_outs(imax); i < imax; i++) {
@@ -1149,8 +1143,9 @@ bool Node::has_special_unique_user() const {
   } else if (is_If() && (n->is_IfFalse() || n->is_IfTrue())) {
     // See IfProjNode::Identity()
     return true;
+  } else {
+    return BarrierSet::barrier_set()->barrier_set_c2()->has_special_unique_user(this);
   }
-  return false;
 };
 
 //--------------------------find_exact_control---------------------------------
@@ -1316,6 +1311,9 @@ static void kill_dead_code( Node *dead, PhaseIterGVN *igvn ) {
 
   while (nstack.size() > 0) {
     dead = nstack.pop();
+    if (dead->Opcode() == Op_SafePoint) {
+      dead->as_SafePoint()->disconnect_from_root(igvn);
+    }
     if (dead->outcnt() > 0) {
       // Keep dead node on stack until all uses are processed.
       nstack.push(dead);
@@ -1373,7 +1371,7 @@ static void kill_dead_code( Node *dead, PhaseIterGVN *igvn ) {
         igvn->C->remove_range_check_cast(cast);
       }
       if (dead->Opcode() == Op_Opaque4) {
-        igvn->C->remove_range_check_cast(dead);
+        igvn->C->remove_opaque4_node(dead);
       }
       BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
       bs->unregister_potential_barrier_node(dead);

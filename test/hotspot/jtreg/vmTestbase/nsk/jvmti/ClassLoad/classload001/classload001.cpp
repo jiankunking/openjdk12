@@ -79,19 +79,19 @@ static jrawMonitorID countLock;
 static void initCounters() {
     size_t i;
 
-    for(i=0; i<EXP_SIG_NUM; i++)
+    for (i=0; i<EXP_SIG_NUM; i++)
         clsEvents[i] = 0;
 
-    for(i=0; i<UNEXP_SIG_NUM; i++)
+    for (i=0; i<UNEXP_SIG_NUM; i++)
         primClsEvents[i] = 0;
 }
 
 static int findSig(char *sig, int expected) {
     unsigned int i;
 
-    for (i=0; i<((expected==1)?EXP_SIG_NUM:UNEXP_SIG_NUM); i++)
+    for (i=0; i<((expected == 1) ? EXP_SIG_NUM : UNEXP_SIG_NUM); i++)
         if (sig != NULL &&
-                strcmp(((expected==1)?expSigs[i]:unexpSigs[i]), sig) == 0)
+                strcmp(((expected == 1) ? expSigs[i] : unexpSigs[i]), sig) == 0)
             return i; /* the signature found, return index */
 
     return -1; /* the signature not found */
@@ -120,18 +120,22 @@ ClassLoad(jvmtiEnv *jvmti_env, JNIEnv *env, jthread thread, jclass klass) {
         NSK_COMPLAIN0("TEST FAILURE: unable to obtain a class signature\n");
     }
 
-    if ((i = findSig(sig, 1)) != -1) {
+    i = findSig(sig, 1);
+    if (i != -1) {
         clsEvents[i]++;
         NSK_DISPLAY1("CHECK PASSED: ClassLoad event received for the class \"%s\" as expected\n",
             sig);
     }
-    else if ((i = findSig(sig, 0)) != -1) {
+    else {
+      i = findSig(sig, 0);
+      if (i != -1) {
         result = STATUS_FAILED;
         primClsEvents[i]++;
         NSK_COMPLAIN1(
             "TEST FAILED: JVMTI_EVENT_CLASS_LOAD event received for\n"
             "\t a primitive class/array of primitive types with the signature \"%s\"\n",
             sig);
+      }
     }
 
     unlock(jvmti_env, env);

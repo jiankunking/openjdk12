@@ -40,7 +40,7 @@
 #include "runtime/thread.inline.hpp"
 #include "runtime/threadSMR.hpp"
 #include "runtime/vmThread.hpp"
-#include "runtime/vm_operations.hpp"
+#include "runtime/vmOperations.hpp"
 #include "runtime/vm_version.hpp"
 #include "runtime/flags/jvmFlag.hpp"
 #include "services/memTracker.hpp"
@@ -821,6 +821,14 @@ void VMError::report(outputStream* st, bool _verbose) {
        st->print_cr("---------------  P R O C E S S  ---------------");
        st->cr();
      }
+
+#ifndef _WIN32
+  STEP("printing user info")
+
+     if (ExtensiveErrorReports && _verbose) {
+       os::Posix::print_user_info(st);
+     }
+#endif
 
   STEP("printing all threads")
 

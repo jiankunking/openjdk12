@@ -68,9 +68,9 @@ import java.util.jar.Attributes;
 import java.util.jar.Attributes.Name;
 import java.util.zip.ZipFile;
 
-import jdk.internal.misc.JavaNetURLAccess;
-import jdk.internal.misc.JavaUtilZipFileAccess;
-import jdk.internal.misc.SharedSecrets;
+import jdk.internal.access.JavaNetURLAccess;
+import jdk.internal.access.JavaUtilZipFileAccess;
+import jdk.internal.access.SharedSecrets;
 import jdk.internal.util.jar.InvalidJarIndexError;
 import jdk.internal.util.jar.JarIndex;
 import sun.net.util.URLUtil;
@@ -97,10 +97,10 @@ public class URLClassPath {
         JAVA_VERSION = props.getProperty("java.version");
         DEBUG = (props.getProperty("sun.misc.URLClassPath.debug") != null);
         String p = props.getProperty("sun.misc.URLClassPath.disableJarChecking");
-        DISABLE_JAR_CHECKING = p != null ? p.equals("true") || p.equals("") : false;
+        DISABLE_JAR_CHECKING = p != null ? p.equals("true") || p.isEmpty() : false;
 
         p = props.getProperty("jdk.net.URLClassPath.disableRestrictedPermissions");
-        DISABLE_ACC_CHECKING = p != null ? p.equals("true") || p.equals("") : false;
+        DISABLE_ACC_CHECKING = p != null ? p.equals("true") || p.isEmpty() : false;
 
         // This property will be removed in a later release
         p = props.getProperty("jdk.net.URLClassPath.disableClassPathURLCheck", "true");
@@ -190,7 +190,7 @@ public class URLClassPath {
                 String element = (next == -1)
                     ? cp.substring(off)
                     : cp.substring(off, next);
-                if (element.length() > 0 || !skipEmptyElements) {
+                if (!element.isEmpty() || !skipEmptyElements) {
                     URL url = toFileURL(element);
                     if (url != null) path.add(url);
                 }
@@ -805,7 +805,7 @@ public class URLClassPath {
         private JarFile getJarFile(URL url) throws IOException {
             // Optimize case where url refers to a local jar file
             if (isOptimizable(url)) {
-                FileURLMapper p = new FileURLMapper (url);
+                FileURLMapper p = new FileURLMapper(url);
                 if (!p.exists()) {
                     throw new FileNotFoundException(p.getPath());
                 }

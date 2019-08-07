@@ -2685,33 +2685,6 @@ uint MacroAssembler::get_poll_register(address instr_loc) {
   return 0;
 }
 
-bool MacroAssembler::is_memory_serialization(int instruction, JavaThread* thread, void* ucontext) {
-  ShouldNotCallThis();
-  return false;
-}
-
-// Write serialization page so VM thread can do a pseudo remote membar
-// We use the current thread pointer to calculate a thread specific
-// offset to write to within the page. This minimizes bus traffic
-// due to cache line collision.
-void MacroAssembler::serialize_memory(Register thread, Register tmp1, Register tmp2) {
-  assert_different_registers(tmp1, tmp2);
-  z_sllg(tmp2, thread, os::get_serialize_page_shift_count());
-  load_const_optimized(tmp1, (long) os::get_memory_serialize_page());
-
-  int mask = os::get_serialize_page_mask();
-  if (Immediate::is_uimm16(mask)) {
-    z_nill(tmp2, mask);
-    z_llghr(tmp2, tmp2);
-  } else {
-    z_nilf(tmp2, mask);
-    z_llgfr(tmp2, tmp2);
-  }
-
-  z_release();
-  z_st(Z_R0, 0, tmp2, tmp1);
-}
-
 void MacroAssembler::safepoint_poll(Label& slow_path, Register temp_reg) {
   if (SafepointMechanism::uses_thread_local_poll()) {
     const Address poll_byte_addr(Z_thread, in_bytes(Thread::polling_page_offset()) + 7 /* Big Endian */);
@@ -6350,75 +6323,6 @@ void MacroAssembler::update_1word_crc32(Register crc, Register buf, Register tab
   z_xy(t0, Address(table, t1, (intptr_t)ix2));
   z_xr(t0, t2);           // Now t0 contains the updated CRC value.
   lgr_if_needed(crc, t0);
-}
-
-/**
- * @param crc   register containing existing CRC (32-bit)
- * @param buf   register pointing to input byte buffer (byte*)
- * @param len   register containing number of bytes
- * @param table register pointing to CRC table
- *
- * uses Z_R10..Z_R13 as work register. Must be saved/restored by caller!
- */
-void MacroAssembler::kernel_crc32_2word(Register crc, Register buf, Register len, Register table,
-                                        Register t0,  Register t1,  Register t2,  Register t3,
-                                        bool invertCRC) {
-  assert_different_registers(crc, buf, len, table);
-
-  Label L_mainLoop, L_tail;
-  Register  data = t0;
-  Register  ctr  = Z_R0;
-  const int mainLoop_stepping = 8;
-  const int tailLoop_stepping = 1;
-  const int log_stepping      = exact_log2(mainLoop_stepping);
-
-  // Don't test for len <= 0 here. This pathological case should not occur anyway.
-  // Optimizing for it by adding a test and a branch seems to be a waste of CPU cycles.
-  // The situation itself is detected and handled correctly by the conditional branches
-  // following aghi(len, -stepping) and aghi(len, +stepping).
-
-  if (invertCRC) {
-    not_(crc, noreg, false);           // 1s complement of crc
-  }
-
-#if 0
-  {
-    // Pre-mainLoop alignment did not show any positive effect on performance.
-    // We leave the code in for reference. Maybe the vector instructions in z13 depend on alignment.
-
-    z_cghi(len, mainLoop_stepping);    // Alignment is useless for short data streams.
-    z_brnh(L_tail);
-
-    // Align buf to word (4-byte) boundary.
-    z_lcr(ctr, buf);
-    rotate_then_insert(ctr, ctr, 62, 63, 0, true); // TODO: should set cc
-    z_sgfr(len, ctr);                  // Remaining len after alignment.
-
-    update_byteLoop_crc32(crc, buf, ctr, table, data);
-  }
-#endif
-
-  // Check for short (<mainLoop_stepping bytes) buffer.
-  z_srag(ctr, len, log_stepping);
-  z_brnh(L_tail);
-
-  z_lrvr(crc, crc);          // Revert byte order because we are dealing with big-endian data.
-  rotate_then_insert(len, len, 64-log_stepping, 63, 0, true); // #bytes for tailLoop
-
-  BIND(L_mainLoop);
-    update_1word_crc32(crc, buf, table, 0, 0, crc, t1, t2, t3);
-    update_1word_crc32(crc, buf, table, 4, mainLoop_stepping, crc, t1, t2, t3);
-    z_brct(ctr, L_mainLoop); // Iterate.
-
-  z_lrvr(crc, crc);          // Revert byte order back to original.
-
-  // Process last few (<8) bytes of buffer.
-  BIND(L_tail);
-  update_byteLoop_crc32(crc, buf, len, table, data);
-
-  if (invertCRC) {
-    not_(crc, noreg, false);           // 1s complement of crc
-  }
 }
 
 /**

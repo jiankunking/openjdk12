@@ -316,7 +316,11 @@ void os::init_system_properties_values() {
   //        ...
   //        7: The default directories, normally /lib and /usr/lib.
 #ifndef DEFAULT_LIBPATH
-  #define DEFAULT_LIBPATH "/lib:/usr/lib"
+  #ifndef OVERRIDE_LIBPATH
+    #define DEFAULT_LIBPATH "/lib:/usr/lib"
+  #else
+    #define DEFAULT_LIBPATH OVERRIDE_LIBPATH
+  #endif
 #endif
 
 // Base path of extensions installed on the system.
@@ -3167,6 +3171,10 @@ extern "C" {
 // this is called _after_ the global arguments have been parsed
 jint os::init_2(void) {
 
+  // This could be set after os::Posix::init() but all platforms
+  // have to set it the same so we have to mirror Solaris.
+  DEBUG_ONLY(os::set_mutex_init_done();)
+
   os::Posix::init_2();
 
   // initialize suspend/resume support - must do this before signal_sets_init()
@@ -3380,7 +3388,7 @@ bool os::message_box(const char* title, const char* message) {
 static inline struct timespec get_mtime(const char* filename) {
   struct stat st;
   int ret = os::stat(filename, &st);
-  assert(ret == 0, "failed to stat() file '%s': %s", filename, strerror(errno));
+  assert(ret == 0, "failed to stat() file '%s': %s", filename, os::strerror(errno));
 #ifdef __APPLE__
   return st.st_mtimespec;
 #else

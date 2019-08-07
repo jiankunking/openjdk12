@@ -324,6 +324,7 @@ class LibraryCallKit : public GraphKit {
   bool inline_montgomerySquare();
   bool inline_vectorizedMismatch();
   bool inline_fma(vmIntrinsics::ID id);
+  bool inline_character_compare(vmIntrinsics::ID id);
 
   bool inline_profileBoolean();
   bool inline_isCompileConstant();
@@ -866,6 +867,12 @@ bool LibraryCallKit::try_to_inline(int predicate) {
   case vmIntrinsics::_fmaD:
   case vmIntrinsics::_fmaF:
     return inline_fma(intrinsic_id());
+
+  case vmIntrinsics::_isDigit:
+  case vmIntrinsics::_isLowerCase:
+  case vmIntrinsics::_isUpperCase:
+  case vmIntrinsics::_isWhitespace:
+    return inline_character_compare(intrinsic_id());
 
   default:
     // If you get here, it may be that someone has added a new intrinsic
@@ -4464,7 +4471,7 @@ JVMState* LibraryCallKit::arraycopy_restore_alloc_state(AllocateArrayNode* alloc
         for (MergeMemStream mms(merged_memory(), mem->as_MergeMem()); mms.next_non_empty2(); ) {
           Node* n = mms.memory();
           if (n != mms.memory2() && !(n->is_Proj() && n->in(0) == alloc->initialization())) {
-            assert(n->is_Store(), "what else?");
+            assert(n->is_Store() || n->Opcode() == Op_ShenandoahWBMemProj, "what else?");
             no_interfering_store = false;
             break;
           }
@@ -4473,7 +4480,7 @@ JVMState* LibraryCallKit::arraycopy_restore_alloc_state(AllocateArrayNode* alloc
         for (MergeMemStream mms(merged_memory()); mms.next_non_empty(); ) {
           Node* n = mms.memory();
           if (n != mem && !(n->is_Proj() && n->in(0) == alloc->initialization())) {
-            assert(n->is_Store(), "what else?");
+            assert(n->is_Store() || n->Opcode() == Op_ShenandoahWBMemProj, "what else?");
             no_interfering_store = false;
             break;
           }
@@ -6253,6 +6260,11 @@ bool LibraryCallKit::inline_base64_encodeBlock() {
   Node* dp = argument(5);
   Node* isURL = argument(6);
 
+  src = must_be_not_null(src, true);
+  src = access_resolve(src, ACCESS_READ);
+  dest = must_be_not_null(dest, true);
+  dest = access_resolve(dest, ACCESS_WRITE);
+
   Node* src_start = array_element_address(src, intcon(0), T_BYTE);
   assert(src_start, "source array is NULL");
   Node* dest_start = array_element_address(dest, intcon(0), T_BYTE);
@@ -6552,6 +6564,32 @@ bool LibraryCallKit::inline_fma(vmIntrinsics::ID id) {
     fatal_unexpected_iid(id);  break;
   }
   set_result(result);
+  return true;
+}
+
+bool LibraryCallKit::inline_character_compare(vmIntrinsics::ID id) {
+  // argument(0) is receiver
+  Node* codePoint = argument(1);
+  Node* n = NULL;
+
+  switch (id) {
+    case vmIntrinsics::_isDigit :
+      n = new DigitNode(control(), codePoint);
+      break;
+    case vmIntrinsics::_isLowerCase :
+      n = new LowerCaseNode(control(), codePoint);
+      break;
+    case vmIntrinsics::_isUpperCase :
+      n = new UpperCaseNode(control(), codePoint);
+      break;
+    case vmIntrinsics::_isWhitespace :
+      n = new WhitespaceNode(control(), codePoint);
+      break;
+    default:
+      fatal_unexpected_iid(id);
+  }
+
+  set_result(_gvn.transform(n));
   return true;
 }
 

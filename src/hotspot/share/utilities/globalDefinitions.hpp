@@ -69,6 +69,7 @@
 #define UINT64_FORMAT_X        "%" PRIx64
 #define INT64_FORMAT_W(width)  "%" #width PRId64
 #define UINT64_FORMAT_W(width) "%" #width PRIu64
+#define UINT64_FORMAT_X_W(width) "%" #width PRIx64
 
 #define PTR64_FORMAT           "0x%016" PRIx64
 
@@ -163,15 +164,6 @@ const int BitsPerSize_t      = size_tSize * BitsPerByte;
 
 // Size of a char[] needed to represent a jint as a string in decimal.
 const int jintAsStringSize = 12;
-
-// In fact this should be
-// log2_intptr(sizeof(class JavaThread)) - log2_intptr(64);
-// see os::set_memory_serialize_page()
-#ifdef _LP64
-const int SerializePageShiftCount = 4;
-#else
-const int SerializePageShiftCount = 3;
-#endif
 
 // An opaque struct of heap-word width, so that HeapWord* can be a generic
 // pointer into the heap.  We require that object sizes be measured in
@@ -430,14 +422,6 @@ const size_t minimumStringTableSize = 128;
 
 const size_t defaultSymbolTableSize = 32768; // 2^15
 const size_t minimumSymbolTableSize = 1024;
-
-
-//----------------------------------------------------------------------------------------------------
-// HotSwap - for JVMTI   aka Class File Replacement and PopFrame
-//
-// Determines whether on-the-fly class replacement and frame popping are enabled.
-
-#define HOTSWAP
 
 //----------------------------------------------------------------------------------------------------
 // Object alignment, in units of HeapWords.
@@ -925,7 +909,6 @@ class LocationValue;
 class ConstantValue;
 class IllegalValue;
 
-class PrivilegedElement;
 class MonitorArray;
 
 class MonitorInfo;
@@ -1042,12 +1025,11 @@ inline bool is_power_of_2_long(jlong x) {
 }
 
 // Returns largest i such that 2^i <= x.
-// If x < 0, the function returns 31 on a 32-bit machine and 63 on a 64-bit machine.
 // If x == 0, the function returns -1.
-inline int log2_intptr(intptr_t x) {
+inline int log2_intptr(uintptr_t x) {
   int i = -1;
   uintptr_t p = 1;
-  while (p != 0 && p <= (uintptr_t)x) {
+  while (p != 0 && p <= x) {
     // p = 2^(i+1) && p <= x (i.e., 2^(i+1) <= x)
     i++; p *= 2;
   }
@@ -1057,17 +1039,42 @@ inline int log2_intptr(intptr_t x) {
 }
 
 //* largest i such that 2^i <= x
-//  A negative value of 'x' will return '63'
-inline int log2_long(jlong x) {
+inline int log2_long(julong x) {
   int i = -1;
   julong p =  1;
-  while (p != 0 && p <= (julong)x) {
+  while (p != 0 && p <= x) {
     // p = 2^(i+1) && p <= x (i.e., 2^(i+1) <= x)
     i++; p *= 2;
   }
   // p = 2^(i+1) && x < p (i.e., 2^i <= x < 2^(i+1))
   // (if p = 0 then overflow occurred and i = 63)
   return i;
+}
+
+// If x < 0, the function returns 31 on a 32-bit machine and 63 on a 64-bit machine.
+inline int log2_intptr(intptr_t x) {
+  return log2_intptr((uintptr_t)x);
+}
+
+inline int log2_int(int x) {
+  STATIC_ASSERT(sizeof(int) <= sizeof(uintptr_t));
+  return log2_intptr((uintptr_t)x);
+}
+
+inline int log2_jint(jint x) {
+  STATIC_ASSERT(sizeof(jint) <= sizeof(uintptr_t));
+  return log2_intptr((uintptr_t)x);
+}
+
+inline int log2_uint(uint x) {
+  STATIC_ASSERT(sizeof(uint) <= sizeof(uintptr_t));
+  return log2_intptr((uintptr_t)x);
+}
+
+//  A negative value of 'x' will return '63'
+inline int log2_jlong(jlong x) {
+  STATIC_ASSERT(sizeof(jlong) <= sizeof(julong));
+  return log2_long((julong)x);
 }
 
 //* the argument must be exactly a power of 2
@@ -1084,6 +1091,29 @@ inline int exact_log2_long(jlong x) {
 
 inline bool is_odd (intx x) { return x & 1;      }
 inline bool is_even(intx x) { return !is_odd(x); }
+
+// abs methods which cannot overflow and so are well-defined across
+// the entire domain of integer types.
+static inline unsigned int uabs(unsigned int n) {
+  union {
+    unsigned int result;
+    int value;
+  };
+  result = n;
+  if (value < 0) result = 0-result;
+  return result;
+}
+static inline julong uabs(julong n) {
+  union {
+    julong result;
+    jlong value;
+  };
+  result = n;
+  if (value < 0) result = 0-result;
+  return result;
+}
+static inline julong uabs(jlong n) { return uabs((julong)n); }
+static inline unsigned int uabs(int n) { return uabs((unsigned int)n); }
 
 // "to" should be greater than "from."
 inline intx byte_size(void* from, void* to) {
@@ -1270,5 +1300,18 @@ static inline void* dereference_vptr(const void* addr) {
 
 typedef const char* ccstr;
 typedef const char* ccstrlist;   // represents string arguments which accumulate
+
+//----------------------------------------------------------------------------------------------------
+// Default hash/equals functions used by ResourceHashtable and KVHashtable
+
+template<typename K> unsigned primitive_hash(const K& k) {
+  unsigned hash = (unsigned)((uintptr_t)k);
+  return hash ^ (hash >> 3); // just in case we're dealing with aligned ptrs
+}
+
+template<typename K> bool primitive_equals(const K& k0, const K& k1) {
+  return k0 == k1;
+}
+
 
 #endif // SHARE_VM_UTILITIES_GLOBALDEFINITIONS_HPP

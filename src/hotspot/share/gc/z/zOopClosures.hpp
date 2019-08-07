@@ -39,13 +39,22 @@ public:
 #endif
 };
 
+class ZNMethodOopClosure : public OopClosure {
+public:
+  virtual void do_oop(oop* p);
+  virtual void do_oop(narrowOop* p);
+};
+
 template <bool finalizable>
-class ZMarkBarrierOopClosure : public BasicOopIterateClosure {
+class ZMarkBarrierOopClosure : public MetadataVisitingOopIterateClosure {
 public:
   ZMarkBarrierOopClosure();
 
   virtual void do_oop(oop* p);
   virtual void do_oop(narrowOop* p);
+
+  virtual void do_klass(Klass* k);
+  virtual void do_cld(ClassLoaderData* cld);
 
 #ifdef ASSERT
   virtual bool should_verify_oops() {
@@ -71,27 +80,21 @@ public:
   virtual void do_oop(narrowOop* p);
 };
 
-class ZVerifyHeapOopClosure : public BasicOopIterateClosure {
+class ZVerifyOopClosure : public ZRootsIteratorClosure, public BasicOopIterateClosure {
 public:
-  virtual ReferenceIterationMode reference_iteration_mode();
-
   virtual void do_oop(oop* p);
   virtual void do_oop(narrowOop* p);
 
+  virtual ReferenceIterationMode reference_iteration_mode() {
+    return DO_FIELDS;
+  }
+
 #ifdef ASSERT
-  // Verification handled by the closure itself.
+  // Verification handled by the closure itself
   virtual bool should_verify_oops() {
     return false;
   }
 #endif
-};
-
-class ZVerifyRootOopClosure : public ZRootsIteratorClosure {
-public:
-  ZVerifyRootOopClosure();
-
-  virtual void do_oop(oop* p);
-  virtual void do_oop(narrowOop* p);
 };
 
 class ZVerifyObjectClosure : public ObjectClosure {

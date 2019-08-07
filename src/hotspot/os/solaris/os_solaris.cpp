@@ -700,19 +700,6 @@ void os::breakpoint() {
   BREAKPOINT;
 }
 
-bool os::obsolete_option(const JavaVMOption *option) {
-  if (!strncmp(option->optionString, "-Xt", 3)) {
-    return true;
-  } else if (!strncmp(option->optionString, "-Xtm", 4)) {
-    return true;
-  } else if (!strncmp(option->optionString, "-Xverifyheap", 12)) {
-    return true;
-  } else if (!strncmp(option->optionString, "-Xmaxjitcodesize", 16)) {
-    return true;
-  }
-  return false;
-}
-
 bool os::Solaris::valid_stack_address(Thread* thread, address sp) {
   address  stackStart  = (address)thread->stack_base();
   address  stackEnd    = (address)(stackStart - (address)thread->stack_size());
@@ -1665,7 +1652,7 @@ void* os::get_default_process_handle() {
 static inline time_t get_mtime(const char* filename) {
   struct stat st;
   int ret = os::stat(filename, &st);
-  assert(ret == 0, "failed to stat() file '%s': %s", filename, strerror(errno));
+  assert(ret == 0, "failed to stat() file '%s': %s", filename, os::strerror(errno));
   return st.st_mtime;
 }
 
@@ -4212,6 +4199,7 @@ jint os::init_2(void) {
   // initialize synchronization primitives to use either thread or
   // lwp synchronization (controlled by UseLWPSynchronization)
   Solaris::synchronization_init();
+  DEBUG_ONLY(os::set_mutex_init_done();)
 
   if (MaxFDLimit) {
     // set the number of file descriptors to max. print out error

@@ -941,6 +941,12 @@ void MacroAssembler::_verify_oop_addr(Address addr, const char* s, const char* f
   bind(done);
 }
 
+void MacroAssembler::c2bool(Register x)
+{
+  tst(x, 0xff);   // Only look at the lowest byte
+  mov(x, 1, ne);
+}
+
 void MacroAssembler::null_check(Register reg, Register tmp, int offset) {
   if (needs_explicit_null_check(offset)) {
     assert_different_registers(reg, tmp);
@@ -1965,7 +1971,7 @@ void MacroAssembler::resolve(DecoratorSet decorators, Register obj) {
 
 
 #ifdef COMPILER2
-void MacroAssembler::fast_lock(Register Roop, Register Rbox, Register Rscratch, Register Rscratch2)
+void MacroAssembler::fast_lock(Register Roop, Register Rbox, Register Rscratch, Register Rscratch2, Register scratch3)
 {
   assert(VM_Version::supports_ldrex(), "unsupported, yet?");
 
@@ -1979,10 +1985,12 @@ void MacroAssembler::fast_lock(Register Roop, Register Rbox, Register Rscratch, 
   Label fast_lock, done;
 
   if (UseBiasedLocking && !UseOptoBiasInlining) {
-    Label failed;
-    biased_locking_enter(Roop, Rmark, Rscratch, false, noreg, done, failed);
-    bind(failed);
+    assert(scratch3 != noreg, "need extra temporary for -XX:-UseOptoBiasInlining");
+    biased_locking_enter(Roop, Rmark, Rscratch, false, scratch3, done, done);
+    // Fall through if lock not biased otherwise branch to done
   }
+
+  // Invariant: Rmark loaded below does not contain biased lock pattern
 
   ldr(Rmark, Address(Roop, oopDesc::mark_offset_in_bytes()));
   tst(Rmark, markOopDesc::unlocked_value);
@@ -2010,6 +2018,9 @@ void MacroAssembler::fast_lock(Register Roop, Register Rbox, Register Rscratch, 
 
   bind(done);
 
+  // At this point flags are set as follows:
+  //  EQ -> Success
+  //  NE -> Failure, branch to slow path
 }
 
 void MacroAssembler::fast_unlock(Register Roop, Register Rbox, Register Rscratch, Register Rscratch2)

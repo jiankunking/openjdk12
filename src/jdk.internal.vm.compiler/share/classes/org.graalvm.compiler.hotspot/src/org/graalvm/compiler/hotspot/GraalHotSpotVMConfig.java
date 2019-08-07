@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -309,8 +309,11 @@ public class GraalHotSpotVMConfig extends GraalHotSpotVMConfigBase {
     public final int jvmAccWrittenFlags = getConstant("JVM_ACC_WRITTEN_FLAGS", Integer.class);
     public final int jvmAccSynthetic = getConstant("JVM_ACC_SYNTHETIC", Integer.class);
 
+    public final int jvmciCompileStateCanPostOnExceptionsOffset = getFieldOffset("JVMCIEnv::_jvmti_can_post_on_exceptions", Integer.class, "jbyte", Integer.MIN_VALUE);
+
     public final int threadTlabOffset = getFieldOffset("Thread::_tlab", Integer.class, "ThreadLocalAllocBuffer");
     public final int javaThreadAnchorOffset = getFieldOffset("JavaThread::_anchor", Integer.class, "JavaFrameAnchor");
+    public final int javaThreadShouldPostOnExceptionsFlagOffset = getFieldOffset("JavaThread::_should_post_on_exceptions_flag", Integer.class, "int", Integer.MIN_VALUE);
     public final int threadObjectOffset = getFieldOffset("JavaThread::_threadObj", Integer.class, "oop");
     public final int osThreadOffset = getFieldOffset("JavaThread::_osthread", Integer.class, "OSThread*");
     public final int threadIsMethodHandleReturnOffset = getFieldOffset("JavaThread::_is_method_handle_return", Integer.class, "int");
@@ -652,11 +655,13 @@ public class GraalHotSpotVMConfig extends GraalHotSpotVMConfigBase {
     public final long newInstanceAddress = getAddress("JVMCIRuntime::new_instance");
     public final long newArrayAddress = getAddress("JVMCIRuntime::new_array");
     public final long newMultiArrayAddress = getAddress("JVMCIRuntime::new_multi_array");
+    public final long dynamicNewInstanceAddress = getAddress("JVMCIRuntime::dynamic_new_instance");
 
     // Allocation stubs that return null when allocation fails
     public final long newInstanceOrNullAddress = getAddress("JVMCIRuntime::new_instance_or_null", 0L);
     public final long newArrayOrNullAddress = getAddress("JVMCIRuntime::new_array_or_null", 0L);
     public final long newMultiArrayOrNullAddress = getAddress("JVMCIRuntime::new_multi_array_or_null", 0L);
+    public final long dynamicNewInstanceOrNullAddress = getAddress("JVMCIRuntime::dynamic_new_instance_or_null", 0L);
 
     public boolean areNullAllocationStubsAvailable() {
         return newInstanceOrNullAddress != 0L;
@@ -669,9 +674,11 @@ public class GraalHotSpotVMConfig extends GraalHotSpotVMConfigBase {
         if (newInstanceOrNullAddress == 0L) {
             assert newArrayOrNullAddress == 0L;
             assert newMultiArrayOrNullAddress == 0L;
+            assert dynamicNewInstanceOrNullAddress == 0L;
         } else {
             assert newArrayOrNullAddress != 0L;
             assert newMultiArrayOrNullAddress != 0L;
+            assert dynamicNewInstanceOrNullAddress != 0L;
         }
         return true;
     }

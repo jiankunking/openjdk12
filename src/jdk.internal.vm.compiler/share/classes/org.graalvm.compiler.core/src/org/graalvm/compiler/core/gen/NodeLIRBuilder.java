@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,8 @@ package org.graalvm.compiler.core.gen;
 import static jdk.vm.ci.code.ValueUtil.asRegister;
 import static jdk.vm.ci.code.ValueUtil.isLegal;
 import static jdk.vm.ci.code.ValueUtil.isRegister;
+import static org.graalvm.compiler.core.common.SpeculativeExecutionAttacksMitigations.AllTargets;
+import static org.graalvm.compiler.core.common.SpeculativeExecutionAttacksMitigations.Options.MitigateSpeculativeExecutionAttacks;
 import static org.graalvm.compiler.core.common.GraalOptions.MatchExpressions;
 import static org.graalvm.compiler.debug.DebugOptions.LogVerbose;
 import static org.graalvm.compiler.lir.LIR.verifyBlock;
@@ -312,6 +314,19 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
 
     public void doBlockPrologue(@SuppressWarnings("unused") Block block, @SuppressWarnings("unused") OptionValues options) {
 
+        if (MitigateSpeculativeExecutionAttacks.getValue(options) == AllTargets) {
+            boolean hasControlSplitPredecessor = false;
+            for (Block b : block.getPredecessors()) {
+                if (b.getSuccessorCount() > 1) {
+                    hasControlSplitPredecessor = true;
+                    break;
+                }
+            }
+            boolean isStartBlock = block.getPredecessorCount() == 0;
+            if (hasControlSplitPredecessor || isStartBlock) {
+                getLIRGeneratorTool().emitSpeculationFence();
+            }
+        }
     }
 
     @Override
@@ -351,6 +366,7 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
             for (int i = 0; i < nodes.size(); i++) {
                 Node node = nodes.get(i);
                 if (node instanceof ValueNode) {
+                    setSourcePosition(node.getNodeSourcePosition());
                     DebugContext debug = node.getDebug();
                     ValueNode valueNode = (ValueNode) node;
                     if (trace) {
@@ -372,6 +388,8 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
                         debug.log("interior match for %s", valueNode);
                     } else if (operand instanceof ComplexMatchValue) {
                         debug.log("complex match for %s", valueNode);
+                        // Set current position to the position of the root matched node.
+                        setSourcePosition(node.getNodeSourcePosition());
                         ComplexMatchValue match = (ComplexMatchValue) operand;
                         operand = match.evaluate(this);
                         if (operand != null) {
@@ -451,7 +469,6 @@ public abstract class NodeLIRBuilder implements NodeLIRBuilderTool, LIRGeneratio
         if (node.getDebug().isLogEnabled() && node.stamp(NodeView.DEFAULT).isEmpty()) {
             node.getDebug().log("This node has an empty stamp, we are emitting dead code(?): %s", node);
         }
-        setSourcePosition(node.getNodeSourcePosition());
         if (node instanceof LIRLowerable) {
             ((LIRLowerable) node).generate(this);
         } else {

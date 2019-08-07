@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,6 +40,7 @@ import java.util.Arrays;
 
 import org.graalvm.compiler.bytecode.BytecodeProvider;
 import org.graalvm.compiler.lir.amd64.AMD64ArithmeticLIRGeneratorTool.RoundingMode;
+import org.graalvm.compiler.nodes.PauseNode;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderConfiguration.Plugins;
 import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderContext;
@@ -75,6 +76,7 @@ public class AMD64GraphBuilderPlugins {
         invocationPlugins.defer(new Runnable() {
             @Override
             public void run() {
+                registerThreadPlugins(invocationPlugins, arch);
                 registerIntegerLongPlugins(invocationPlugins, IntegerSubstitutions.class, JavaKind.Int, arch, replacementsBytecodeProvider);
                 registerIntegerLongPlugins(invocationPlugins, LongSubstitutions.class, JavaKind.Long, arch, replacementsBytecodeProvider);
                 registerPlatformSpecificUnsafePlugins(invocationPlugins, replacementsBytecodeProvider, explicitUnsafeNullChecks,
@@ -87,6 +89,22 @@ public class AMD64GraphBuilderPlugins {
                 registerArraysEqualsPlugins(invocationPlugins, replacementsBytecodeProvider);
             }
         });
+    }
+
+    private static void registerThreadPlugins(InvocationPlugins plugins, AMD64 arch) {
+        if (!Java8OrEarlier) {
+            // Pause instruction introduced with SSE2
+            if (arch.getFeatures().contains(AMD64.CPUFeature.SSE2)) {
+                Registration r = new Registration(plugins, Thread.class);
+                r.register0("onSpinWait", new InvocationPlugin() {
+                    @Override
+                    public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver) {
+                        b.append(new PauseNode());
+                        return true;
+                    }
+                });
+            }
+        }
     }
 
     private static void registerIntegerLongPlugins(InvocationPlugins plugins, Class<?> substituteDeclaringClass, JavaKind kind, AMD64 arch, BytecodeProvider bytecodeProvider) {
@@ -212,6 +230,9 @@ public class AMD64GraphBuilderPlugins {
             r.setAllowOverwrite(true);
             r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "compareTo", byte[].class, byte[].class);
             r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "compareToUTF16", byte[].class, byte[].class);
+            r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "inflate", byte[].class, int.class, char[].class, int.class, int.class);
+            r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "inflate", byte[].class, int.class, byte[].class, int.class, int.class);
+
             if (arch.getFeatures().contains(CPUFeature.SSSE3)) {
                 r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "indexOf", byte[].class, int.class, int.class);
             }
@@ -224,6 +245,9 @@ public class AMD64GraphBuilderPlugins {
             r.setAllowOverwrite(true);
             r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compareTo", byte[].class, byte[].class);
             r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compareToLatin1", byte[].class, byte[].class);
+            r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compress", char[].class, int.class, byte[].class, int.class, int.class);
+            r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compress", byte[].class, int.class, byte[].class, int.class, int.class);
+
             if (arch.getFeatures().contains(CPUFeature.SSSE3)) {
                 r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "indexOfCharUnsafe", byte[].class, int.class, int.class, int.class);
             }

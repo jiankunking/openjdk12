@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -84,8 +84,8 @@ public final class AMD64ArrayCompareToOp extends AMD64LIRInstruction {
         this.kind2 = kind2;
 
         // Both offsets should be the same but better be safe than sorry.
-        this.array1BaseOffset = tool.getProviders().getArrayOffsetProvider().arrayBaseOffset(kind1);
-        this.array2BaseOffset = tool.getProviders().getArrayOffsetProvider().arrayBaseOffset(kind2);
+        this.array1BaseOffset = tool.getProviders().getMetaAccess().getArrayBaseOffset(kind1);
+        this.array2BaseOffset = tool.getProviders().getMetaAccess().getArrayBaseOffset(kind2);
 
         this.resultValue = result;
         this.array1Value = array1;

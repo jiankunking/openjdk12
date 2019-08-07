@@ -71,6 +71,7 @@
   template(java_lang_Boolean,                         "java/lang/Boolean")                        \
   template(java_lang_Character,                       "java/lang/Character")                      \
   template(java_lang_Character_CharacterCache,        "java/lang/Character$CharacterCache")       \
+  template(java_lang_CharacterDataLatin1,             "java/lang/CharacterDataLatin1")            \
   template(java_lang_Float,                           "java/lang/Float")                          \
   template(java_lang_Double,                          "java/lang/Double")                         \
   template(java_lang_Byte,                            "java/lang/Byte")                           \
@@ -99,6 +100,8 @@
   template(java_lang_CharSequence,                    "java/lang/CharSequence")                   \
   template(java_lang_SecurityManager,                 "java/lang/SecurityManager")                \
   template(java_security_AccessControlContext,        "java/security/AccessControlContext")       \
+  template(java_security_AccessController,            "java/security/AccessController")           \
+  template(executePrivileged_name,                    "executePrivileged")                        \
   template(java_security_CodeSource,                  "java/security/CodeSource")                 \
   template(java_security_ProtectionDomain,            "java/security/ProtectionDomain")           \
   template(java_security_SecureClassLoader,           "java/security/SecureClassLoader")          \
@@ -303,6 +306,7 @@
   template(java_lang_invoke_LambdaForm_Compiled_signature, "Ljava/lang/invoke/LambdaForm$Compiled;") \
   template(java_lang_invoke_LambdaForm_Hidden_signature, "Ljava/lang/invoke/LambdaForm$Hidden;")  \
   template(java_lang_invoke_MethodHandleNatives_CallSiteContext_signature, "Ljava/lang/invoke/MethodHandleNatives$CallSiteContext;") \
+  template(java_security_AccessController_Hidden_signature, "Ljava/security/AccessController$Hidden;")  \
   /* internal up-calls made only by the JVM, via class sun.invoke.MethodHandleNatives: */         \
   template(findMethodHandleType_name,                 "findMethodHandleType")                     \
   template(findMethodHandleType_signature,       "(Ljava/lang/Class;[Ljava/lang/Class;)Ljava/lang/invoke/MethodType;") \
@@ -423,6 +427,7 @@
   template(signers_name,                              "signers_name")                             \
   template(loader_data_name,                          "loader_data")                              \
   template(vmdependencies_name,                       "vmdependencies")                           \
+  template(last_cleanup_name,                         "last_cleanup")                             \
   template(loader_name,                               "loader")                                   \
   template(getModule_name,                            "getModule")                                \
   template(input_stream_void_signature,               "(Ljava/io/InputStream;)V")                 \
@@ -546,7 +551,6 @@
   template(char_StringBuffer_signature,               "(C)Ljava/lang/StringBuffer;")                              \
   template(int_String_signature,                      "(I)Ljava/lang/String;")                                    \
   template(boolean_boolean_int_signature,             "(ZZ)I")                                                    \
-  template(codesource_permissioncollection_signature, "(Ljava/security/CodeSource;Ljava/security/PermissionCollection;)V") \
   /* signature symbols needed by intrinsics */                                                                    \
   VM_INTRINSICS_DO(VM_INTRINSIC_IGNORE, VM_SYMBOL_IGNORE, VM_SYMBOL_IGNORE, template, VM_ALIAS_IGNORE)            \
                                                                                                                   \
@@ -929,6 +933,15 @@
    do_signature(indexOfChar_signature,                           "([BIII)I")                                            \
   do_intrinsic(_equalsL,                  java_lang_StringLatin1,equals_name, equalsB_signature,                 F_S)   \
   do_intrinsic(_equalsU,                  java_lang_StringUTF16, equals_name, equalsB_signature,                 F_S)   \
+                                                                                                                        \
+  do_intrinsic(_isDigit,                  java_lang_CharacterDataLatin1, isDigit_name,      int_bool_signature,  F_R)   \
+   do_name(     isDigit_name,                                           "isDigit")                                      \
+  do_intrinsic(_isLowerCase,              java_lang_CharacterDataLatin1, isLowerCase_name,  int_bool_signature,  F_R)   \
+   do_name(     isLowerCase_name,                                       "isLowerCase")                                  \
+  do_intrinsic(_isUpperCase,              java_lang_CharacterDataLatin1, isUpperCase_name,  int_bool_signature,  F_R)   \
+   do_name(     isUpperCase_name,                                       "isUpperCase")                                  \
+  do_intrinsic(_isWhitespace,             java_lang_CharacterDataLatin1, isWhitespace_name, int_bool_signature,  F_R)   \
+   do_name(     isWhitespace_name,                                      "isWhitespace")                                 \
                                                                                                                         \
   do_intrinsic(_Preconditions_checkIndex, jdk_internal_util_Preconditions, checkIndex_name, Preconditions_checkIndex_signature, F_S)   \
    do_signature(Preconditions_checkIndex_signature,              "(IILjava/util/function/BiFunction;)I")                \

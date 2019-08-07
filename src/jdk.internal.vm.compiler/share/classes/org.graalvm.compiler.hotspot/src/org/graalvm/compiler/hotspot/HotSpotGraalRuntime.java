@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,8 +28,8 @@ import static jdk.vm.ci.common.InitTimer.timer;
 import static jdk.vm.ci.hotspot.HotSpotJVMCIRuntime.runtime;
 import static org.graalvm.compiler.core.common.GraalOptions.GeneratePIC;
 import static org.graalvm.compiler.core.common.GraalOptions.HotSpotPrintInlining;
-import static org.graalvm.compiler.debug.DebugContext.DEFAULT_LOG_STREAM;
 
+import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -45,6 +45,7 @@ import org.graalvm.compiler.api.runtime.GraalRuntime;
 import org.graalvm.compiler.core.CompilationWrapper.ExceptionAction;
 import org.graalvm.compiler.core.common.CompilationIdentifier;
 import org.graalvm.compiler.core.common.GraalOptions;
+import org.graalvm.compiler.core.common.spi.ForeignCallsProvider;
 import org.graalvm.compiler.core.target.Backend;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.debug.DebugContext.Description;
@@ -276,7 +277,7 @@ public final class HotSpotGraalRuntime implements HotSpotGraalRuntimeProvider {
     }
 
     @Override
-    public DebugContext openDebugContext(OptionValues compilationOptions, CompilationIdentifier compilationId, Object compilable, Iterable<DebugHandlersFactory> factories) {
+    public DebugContext openDebugContext(OptionValues compilationOptions, CompilationIdentifier compilationId, Object compilable, Iterable<DebugHandlersFactory> factories, PrintStream logStream) {
         if (management != null && management.poll(false) != null) {
             if (compilable instanceof HotSpotResolvedJavaMethod) {
                 HotSpotResolvedObjectType type = ((HotSpotResolvedJavaMethod) compilable).getDeclaringClass();
@@ -294,7 +295,7 @@ public final class HotSpotGraalRuntime implements HotSpotGraalRuntimeProvider {
             }
         }
         Description description = new Description(compilable, compilationId.toString(CompilationIdentifier.Verbosity.ID));
-        return DebugContext.create(compilationOptions, description, metricValues, DEFAULT_LOG_STREAM, factories);
+        return DebugContext.create(compilationOptions, description, metricValues, logStream, factories);
     }
 
     @Override
@@ -328,8 +329,12 @@ public final class HotSpotGraalRuntime implements HotSpotGraalRuntimeProvider {
             return (T) this;
         } else if (clazz == SnippetReflectionProvider.class) {
             return (T) getHostProviders().getSnippetReflection();
+        } else if (clazz == GraalHotSpotVMConfig.class) {
+            return (T) getVMConfig();
         } else if (clazz == StampProvider.class) {
             return (T) getHostProviders().getStampProvider();
+        } else if (ForeignCallsProvider.class.isAssignableFrom(clazz)) {
+            return (T) getHostProviders().getForeignCalls();
         }
         return null;
     }

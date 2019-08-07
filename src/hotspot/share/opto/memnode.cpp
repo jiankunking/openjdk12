@@ -1404,7 +1404,7 @@ Node *LoadNode::split_through_phi(PhaseGVN *phase) {
 
   // Do nothing here if Identity will find a value
   // (to avoid infinite chain of value phis generation).
-  if (!phase->eqv(this, this->Identity(phase)))
+  if (!phase->eqv(this, phase->apply_identity(this)))
     return NULL;
 
   // Select Region to split through.
@@ -1494,7 +1494,7 @@ Node *LoadNode::split_through_phi(PhaseGVN *phase) {
       // otherwise it will be not updated during igvn->transform since
       // igvn->type(x) is set to x->Value() already.
       x->raise_bottom_type(t);
-      Node *y = x->Identity(igvn);
+      Node *y = igvn->apply_identity(x);
       if (y != x) {
         x = y;
       } else {
@@ -1532,10 +1532,14 @@ Node *LoadNode::Ideal(PhaseGVN *phase, bool can_reshape) {
   Node* address = in(MemNode::Address);
   bool progress = false;
 
+  bool addr_mark = ((phase->type(address)->isa_oopptr() || phase->type(address)->isa_narrowoop()) &&
+         phase->type(address)->is_ptr()->offset() == oopDesc::mark_offset_in_bytes());
+
   // Skip up past a SafePoint control.  Cannot do this for Stores because
   // pointer stores & cardmarks must stay on the same side of a SafePoint.
   if( ctrl != NULL && ctrl->Opcode() == Op_SafePoint &&
-      phase->C->get_alias_index(phase->type(address)->is_ptr()) != Compile::AliasIdxRaw ) {
+      phase->C->get_alias_index(phase->type(address)->is_ptr()) != Compile::AliasIdxRaw  &&
+      !addr_mark ) {
     ctrl = ctrl->in(0);
     set_req(MemNode::Control,ctrl);
     progress = true;
@@ -1697,7 +1701,7 @@ const Type* LoadNode::Value(PhaseGVN* phase) const {
     // as to alignment, which will therefore produce the smallest
     // possible base offset.
     const int min_base_off = arrayOopDesc::base_offset_in_bytes(T_BYTE);
-    const bool off_beyond_header = ((uint)off >= (uint)min_base_off);
+    const bool off_beyond_header = (off >= min_base_off);
 
     // Try to constant-fold a stable array element.
     if (FoldStableValues && !is_mismatched_access() && ary->is_stable()) {
@@ -1734,7 +1738,7 @@ const Type* LoadNode::Value(PhaseGVN* phase) const {
         && Opcode() != Op_LoadKlass && Opcode() != Op_LoadNKlass) {
       // t might actually be lower than _type, if _type is a unique
       // concrete subclass of abstract class t.
-      if (off_beyond_header) {  // is the offset beyond the header?
+      if (off_beyond_header || off == Type::OffsetBot) {  // is the offset beyond the header?
         const Type* jt = t->join_speculative(_type);
         // In any case, do not allow the join, per se, to empty out the type.
         if (jt->empty() && !t->empty()) {
@@ -3230,7 +3234,7 @@ MemBarNode* MemBarNode::leading_membar() const {
   while (leading != NULL && (!leading->is_MemBar() || !leading->as_MemBar()->leading())) {
     while (leading == NULL || leading->is_top() || seen.test_set(leading->_idx)) {
       leading = NULL;
-      while (regions.size() > 0) {
+      while (regions.size() > 0 && leading == NULL) {
         Node* r = regions.node();
         uint i = regions.index();
         if (i < r->req()) {

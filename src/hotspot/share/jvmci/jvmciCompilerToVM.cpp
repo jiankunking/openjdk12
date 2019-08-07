@@ -49,14 +49,14 @@ JVMCIKlassHandle::JVMCIKlassHandle(Thread* thread, Klass* klass) {
   _thread = thread;
   _klass = klass;
   if (klass != NULL) {
-    _holder = Handle(_thread, klass->holder_phantom());
+    _holder = Handle(_thread, klass->klass_holder());
   }
 }
 
 JVMCIKlassHandle& JVMCIKlassHandle::operator=(Klass* klass) {
   _klass = klass;
   if (klass != NULL) {
-    _holder = Handle(_thread, klass->holder_phantom());
+    _holder = Handle(_thread, klass->klass_holder());
   }
   return *this;
 }
@@ -602,6 +602,17 @@ C2V_VMENTRY(jobject, resolveMethod, (JNIEnv *, jobject, jobject receiver_jvmci_t
       return NULL;
   }
 
+  if (method->name() == vmSymbols::clone_name() &&
+      resolved == SystemDictionary::Object_klass() &&
+      recv_klass->is_array_klass()) {
+    // Resolution of the clone method on arrays always returns Object.clone even though that method
+    // has protected access.  There's some trickery in the access checking to make this all work out
+    // so it's necessary to pass in the array class as the resolved class to properly trigger this.
+    // Otherwise it's impossible to resolve the array clone methods through JVMCI.  See
+    // LinkResolver::check_method_accessability for the matching logic.
+    resolved = recv_klass;
+  }
+
   LinkInfo link_info(resolved, h_name, h_signature, caller_klass);
   methodHandle m;
   // Only do exact lookup if receiver klass has been linked.  Otherwise,
@@ -714,6 +725,7 @@ C2V_VMENTRY(jint, installCode, (JNIEnv *jniEnv, jobject, jobject target, jobject
 C2V_END
 
 C2V_VMENTRY(jint, getMetadata, (JNIEnv *jniEnv, jobject, jobject target, jobject compiled_code, jobject metadata))
+#if INCLUDE_AOT
   ResourceMark rm;
   HandleMark hm;
 
@@ -783,6 +795,9 @@ C2V_VMENTRY(jint, getMetadata, (JNIEnv *jniEnv, jobject, jobject target, jobject
   HotSpotMetaData::set_exceptionBytes(metadata_handle, exceptionArrayOop());
 
   return result;
+#else
+  THROW_MSG_0(vmSymbols::java_lang_InternalError(), "unimplemented");
+#endif
 C2V_END
 
 C2V_VMENTRY(void, resetCompilationStatistics, (JNIEnv *jniEnv, jobject))
@@ -1426,12 +1441,16 @@ C2V_VMENTRY(int, methodDataProfileDataSize, (JNIEnv*, jobject, jlong metaspace_m
 C2V_END
 
 C2V_VMENTRY(jlong, getFingerprint, (JNIEnv*, jobject, jlong metaspace_klass))
+#if INCLUDE_AOT
   Klass *k = CompilerToVM::asKlass(metaspace_klass);
   if (k->is_instance_klass()) {
     return InstanceKlass::cast(k)->get_stored_fingerprint();
   } else {
     return 0;
   }
+#else
+  THROW_MSG_0(vmSymbols::java_lang_InternalError(), "unimplemented");
+#endif
 C2V_END
 
 C2V_VMENTRY(jobject, getHostClass, (JNIEnv*, jobject, jobject jvmci_type))
@@ -1490,6 +1509,38 @@ C2V_VMENTRY(void, compileToBytecode, (JNIEnv*, jobject, jobject lambda_form_hand
   }
 C2V_END
 
+C2V_VMENTRY(jobject, asReflectionExecutable, (JNIEnv* env, jobject, jobject jvmci_method))
+  methodHandle m = CompilerToVM::asMethod(jvmci_method);
+  oop executable;
+  if (m->is_initializer()) {
+    if (m->is_static_initializer()) {
+      THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(),
+        "Cannot create java.lang.reflect.Method for class initializer");
+    }
+    executable = Reflection::new_constructor(m, CHECK_NULL);
+  } else {
+    executable = Reflection::new_method(m, false, CHECK_NULL);
+  }
+  return JNIHandles::make_local(thread, executable);
+}
+
+C2V_VMENTRY(jobject, asReflectionField, (JNIEnv* env, jobject, jobject jvmci_type, jint index))
+  Klass* klass = CompilerToVM::asKlass(jvmci_type);
+  if (!klass->is_instance_klass()) {
+    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(),
+        err_msg("Expected non-primitive type, got %s", klass->external_name()));
+  }
+  InstanceKlass* iklass = InstanceKlass::cast(klass);
+  Array<u2>* fields = iklass->fields();
+  if (index < 0 || index > fields->length()) {
+    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(),
+        err_msg("Field index %d out of bounds for %s", index, klass->external_name()));
+  }
+  fieldDescriptor fd(iklass, index);
+  oop reflected = Reflection::new_field(&fd, CHECK_NULL);
+  return JNIHandles::make_local(env, reflected);
+}
+
 #define CC (char*)  /*cast a literal from (const char*)*/
 #define FN_PTR(f) CAST_FROM_FN_PTR(void*, &(c2v_ ## f))
 
@@ -1511,6 +1562,8 @@ C2V_END
 #define HS_METADATA             "Ljdk/vm/ci/hotspot/HotSpotMetaData;"
 #define HS_STACK_FRAME_REF      "Ljdk/vm/ci/hotspot/HotSpotStackFrameReference;"
 #define HS_SPECULATION_LOG      "Ljdk/vm/ci/hotspot/HotSpotSpeculationLog;"
+#define REFLECTION_EXECUTABLE   "Ljava/lang/reflect/Executable;"
+#define REFLECTION_FIELD        "Ljava/lang/reflect/Field;"
 #define METASPACE_METHOD_DATA   "J"
 
 JNINativeMethod CompilerToVM::methods[] = {
@@ -1578,6 +1631,8 @@ JNINativeMethod CompilerToVM::methods[] = {
   {CC "interpreterFrameSize",                         CC "(" BYTECODE_FRAME ")I",                                                           FN_PTR(interpreterFrameSize)},
   {CC "compileToBytecode",                            CC "(" OBJECT ")V",                                                                   FN_PTR(compileToBytecode)},
   {CC "getFlagValue",                                 CC "(" STRING ")" OBJECT,                                                             FN_PTR(getFlagValue)},
+  {CC "asReflectionExecutable",                       CC "(" HS_RESOLVED_METHOD ")" REFLECTION_EXECUTABLE,                                  FN_PTR(asReflectionExecutable)},
+  {CC "asReflectionField",                            CC "(" HS_RESOLVED_KLASS "I)" REFLECTION_FIELD,                                       FN_PTR(asReflectionField)},
 };
 
 int CompilerToVM::methods_count() {

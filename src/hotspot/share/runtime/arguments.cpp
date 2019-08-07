@@ -532,7 +532,7 @@ static SpecialFlag const special_jvm_flags[] = {
   { "MaxRAMFraction",               JDK_Version::jdk(10),  JDK_Version::undefined(), JDK_Version::undefined() },
   { "MinRAMFraction",               JDK_Version::jdk(10),  JDK_Version::undefined(), JDK_Version::undefined() },
   { "InitialRAMFraction",           JDK_Version::jdk(10),  JDK_Version::undefined(), JDK_Version::undefined() },
-  { "UseMembar",                    JDK_Version::jdk(10), JDK_Version::undefined(), JDK_Version::undefined() },
+  { "UseMembar",                    JDK_Version::jdk(10), JDK_Version::jdk(12), JDK_Version::undefined() },
   { "CompilerThreadHintNoPreempt",  JDK_Version::jdk(11), JDK_Version::jdk(12), JDK_Version::jdk(13) },
   { "VMThreadHintNoPreempt",        JDK_Version::jdk(11), JDK_Version::jdk(12), JDK_Version::jdk(13) },
 
@@ -2062,6 +2062,9 @@ bool Arguments::check_vm_args_consistency() {
       log_warning(arguments) ("NUMA support for Heap depends on the file system when AllocateHeapAt option is used.\n");
     }
   }
+
+  status = status && GCArguments::check_args_consistency();
+
   return status;
 }
 
@@ -2074,17 +2077,10 @@ bool Arguments::is_bad_option(const JavaVMOption* option, jboolean ignore,
     option_type = ++spacer; // Set both to the empty string.
   }
 
-  if (os::obsolete_option(option)) {
-    jio_fprintf(defaultStream::error_stream(),
-                "Obsolete %s%soption: %s\n", option_type, spacer,
-      option->optionString);
-    return false;
-  } else {
-    jio_fprintf(defaultStream::error_stream(),
-                "Unrecognized %s%soption: %s\n", option_type, spacer,
-      option->optionString);
-    return true;
-  }
+  jio_fprintf(defaultStream::error_stream(),
+              "Unrecognized %s%soption: %s\n", option_type, spacer,
+              option->optionString);
+  return true;
 }
 
 static const char* user_assertion_options[] = {
@@ -2649,23 +2645,7 @@ jint Arguments::parse_each_vm_init_arg(const JavaVMInitArgs* args, bool* patch_m
       // Obsolete in JDK 10
       JDK_Version::jdk(10).to_string(version, sizeof(version));
       warning("Ignoring option %s; support was removed in %s", option->optionString, version);
-    // -Xconcurrentio
-    } else if (match_option(option, "-Xconcurrentio")) {
-      if (FLAG_SET_CMDLINE(bool, UseLWPSynchronization, true) != JVMFlag::SUCCESS) {
-        return JNI_EINVAL;
-      }
-      if (FLAG_SET_CMDLINE(bool, BackgroundCompilation, false) != JVMFlag::SUCCESS) {
-        return JNI_EINVAL;
-      }
-      SafepointSynchronize::set_defer_thr_suspend_loop_count();
-      if (FLAG_SET_CMDLINE(bool, UseTLAB, false) != JVMFlag::SUCCESS) {
-        return JNI_EINVAL;
-      }
-      if (FLAG_SET_CMDLINE(size_t, NewSizeThreadIncrease, 16 * K) != JVMFlag::SUCCESS) {  // 20Kb per thread added to new generation
-        return JNI_EINVAL;
-      }
-
-      // -Xinternalversion
+    // -Xinternalversion
     } else if (match_option(option, "-Xinternalversion")) {
       jio_fprintf(defaultStream::output_stream(), "%s\n",
                   VM_Version::internal_vm_info_string());
@@ -2976,6 +2956,7 @@ jint Arguments::parse_each_vm_init_arg(const JavaVMInitArgs* args, bool* patch_m
   }
 #endif // LINUX
   fix_appclasspath();
+
   return JNI_OK;
 }
 
@@ -3130,6 +3111,10 @@ jint Arguments::finalize_vm_init_args(bool patch_mod_javabase) {
       BytecodeVerificationRemote = true;
       log_info(cds)("All non-system classes will be verified (-Xverify:remote) during CDS dump time.");
     }
+
+    // Compilation is already disabled if the user specifies -Xshare:dump.
+    // Disable compilation in case user specifies -XX:+DumpSharedSpaces instead of -Xshare:dump.
+    set_mode_flags(_int);
   }
   if (UseSharedSpaces && patch_mod_javabase) {
     no_shared_spaces("CDS is disabled when " JAVA_BASE_NAME " module is patched.");
@@ -3834,6 +3819,7 @@ jint Arguments::parse(const JavaVMInitArgs* initial_cmd_args) {
 
 #if defined(AIX)
   UNSUPPORTED_OPTION(AllocateHeapAt);
+  UNSUPPORTED_OPTION(AllocateOldGenAt);
 #endif
 
   ArgumentsExt::report_unsupported_options();

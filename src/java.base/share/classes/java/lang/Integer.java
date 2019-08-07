@@ -26,7 +26,12 @@
 package java.lang;
 
 import java.lang.annotation.Native;
+import java.lang.invoke.MethodHandles;
+import java.lang.constant.Constable;
+import java.lang.constant.ConstantDesc;
 import java.util.Objects;
+import java.util.Optional;
+
 import jdk.internal.HotSpotIntrinsicCandidate;
 import jdk.internal.misc.VM;
 
@@ -56,7 +61,8 @@ import static java.lang.String.UTF16;
  * @author  Joseph D. Darcy
  * @since 1.0
  */
-public final class Integer extends Number implements Comparable<Integer> {
+public final class Integer extends Number
+        implements Comparable<Integer>, Constable, ConstantDesc {
     /**
      * A constant holding the minimum value an {@code int} can
      * have, -2<sup>31</sup>.
@@ -992,6 +998,12 @@ public final class Integer extends Number implements Comparable<Integer> {
      * During VM initialization, java.lang.Integer.IntegerCache.high property
      * may be set and saved in the private system properties in the
      * jdk.internal.misc.VM class.
+     *
+     * WARNING: The cache is archived with CDS and reloaded from the shared
+     * archive at runtime. The archived cache (Integer[]) and Integer objects
+     * reside in the closed archive heap regions. Care should be taken when
+     * changing the implementation and the cache array should not be assigned
+     * with new Integer object(s) after initialization.
      */
 
     private static class IntegerCache {
@@ -1007,10 +1019,9 @@ public final class Integer extends Number implements Comparable<Integer> {
                 VM.getSavedProperty("java.lang.Integer.IntegerCache.high");
             if (integerCacheHighPropValue != null) {
                 try {
-                    int i = parseInt(integerCacheHighPropValue);
-                    i = Math.max(i, 127);
+                    h = Math.max(parseInt(integerCacheHighPropValue), 127);
                     // Maximum array size is Integer.MAX_VALUE
-                    h = Math.min(i, Integer.MAX_VALUE - (-low) -1);
+                    h = Math.min(h, Integer.MAX_VALUE - (-low) -1);
                 } catch( NumberFormatException nfe) {
                     // If the property cannot be parsed into an int, ignore it.
                 }
@@ -1025,8 +1036,9 @@ public final class Integer extends Number implements Comparable<Integer> {
             if (archivedCache == null || size > archivedCache.length) {
                 Integer[] c = new Integer[size];
                 int j = low;
-                for(int k = 0; k < c.length; k++)
-                    c[k] = new Integer(j++);
+                for(int i = 0; i < c.length; i++) {
+                    c[i] = new Integer(j++);
+                }
                 archivedCache = c;
             }
             cache = archivedCache;
@@ -1397,7 +1409,7 @@ public final class Integer extends Number implements Comparable<Integer> {
         boolean negative = false;
         Integer result;
 
-        if (nm.length() == 0)
+        if (nm.isEmpty())
             throw new NumberFormatException("Zero length string");
         char firstChar = nm.charAt(0);
         // Handle sign, if present
@@ -1823,6 +1835,31 @@ public final class Integer extends Number implements Comparable<Integer> {
      */
     public static int min(int a, int b) {
         return Math.min(a, b);
+    }
+
+    /**
+     * Returns an {@link Optional} containing the nominal descriptor for this
+     * instance, which is the instance itself.
+     *
+     * @return an {@link Optional} describing the {@linkplain Integer} instance
+     * @since 12
+     */
+    @Override
+    public Optional<Integer> describeConstable() {
+        return Optional.of(this);
+    }
+
+    /**
+     * Resolves this instance as a {@link ConstantDesc}, the result of which is
+     * the instance itself.
+     *
+     * @param lookup ignored
+     * @return the {@linkplain Integer} instance
+     * @since 12
+     */
+    @Override
+    public Integer resolveConstantDesc(MethodHandles.Lookup lookup) {
+        return this;
     }
 
     /** use serialVersionUID from JDK 1.0.2 for interoperability */

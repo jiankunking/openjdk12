@@ -226,8 +226,8 @@ void TieredThresholdPolicy::initialize() {
   }
   if (CICompilerCountPerCPU) {
     // Simple log n seems to grow too slowly for tiered, try something faster: log n * log log n
-    int log_cpu = log2_intptr(os::active_processor_count());
-    int loglog_cpu = log2_intptr(MAX2(log_cpu, 1));
+    int log_cpu = log2_int(os::active_processor_count());
+    int loglog_cpu = log2_int(MAX2(log_cpu, 1));
     count = MAX2(log_cpu * loglog_cpu * 3 / 2, 2);
     // Make sure there is enough space in the code cache to hold all the compiler buffers
     size_t c1_size = Compiler::code_buffer_size();
@@ -386,7 +386,7 @@ nmethod* TieredThresholdPolicy::event(const methodHandle& method, const methodHa
       thread->is_interp_only_mode()) {
     return NULL;
   }
-  if (CompileTheWorld || ReplayCompiles) {
+  if (ReplayCompiles) {
     // Don't trigger other compiles in testing mode
     return NULL;
   }

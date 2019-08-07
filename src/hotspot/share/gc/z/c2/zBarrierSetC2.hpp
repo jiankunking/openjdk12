@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,10 +62,14 @@ public:
                   bool oop_reload_allowed);
 
   virtual int Opcode() const;
+  virtual uint size_of() const;
+  virtual uint cmp(const Node& n) const;
   virtual const Type *bottom_type() const;
+  virtual const TypePtr* adr_type() const;
   virtual const Type *Value(PhaseGVN *phase) const;
   virtual Node *Identity(PhaseGVN *phase);
   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
+  virtual uint match_edge(uint idx) const;
 
   LoadBarrierNode* has_dominating_barrier(PhaseIdealLoop* phase,
                                           bool linear_only,
@@ -156,24 +160,28 @@ public:
 class ZBarrierSetC2 : public BarrierSetC2 {
 private:
   ZBarrierSetC2State* state() const;
-  Node* make_cas_loadbarrier(C2AtomicAccess& access) const;
-  Node* make_cmpx_loadbarrier(C2AtomicAccess& access) const;
+  Node* make_cas_loadbarrier(C2AtomicParseAccess& access) const;
+  Node* make_cmpx_loadbarrier(C2AtomicParseAccess& access) const;
   void expand_loadbarrier_basic(PhaseMacroExpand* phase, LoadBarrierNode *barrier) const;
   void expand_loadbarrier_node(PhaseMacroExpand* phase, LoadBarrierNode* barrier) const;
   void expand_loadbarrier_optimized(PhaseMacroExpand* phase, LoadBarrierNode *barrier) const;
   const TypeFunc* load_barrier_Type() const;
 
+#ifdef ASSERT
+  void verify_gc_barriers(bool post_parse) const;
+#endif
+
 protected:
   virtual Node* load_at_resolved(C2Access& access, const Type* val_type) const;
-  virtual Node* atomic_cmpxchg_val_at_resolved(C2AtomicAccess& access,
+  virtual Node* atomic_cmpxchg_val_at_resolved(C2AtomicParseAccess& access,
                                                Node* expected_val,
                                                Node* new_val,
                                                const Type* val_type) const;
-  virtual Node* atomic_cmpxchg_bool_at_resolved(C2AtomicAccess& access,
+  virtual Node* atomic_cmpxchg_bool_at_resolved(C2AtomicParseAccess& access,
                                                 Node* expected_val,
                                                 Node* new_val,
                                                 const Type* value_type) const;
-  virtual Node* atomic_xchg_at_resolved(C2AtomicAccess& access,
+  virtual Node* atomic_xchg_at_resolved(C2AtomicParseAccess& access,
                                         Node* new_val,
                                         const Type* val_type) const;
 
@@ -196,16 +204,24 @@ public:
   virtual void unregister_potential_barrier_node(Node* node) const;
   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const;
   virtual Node* step_over_gc_barrier(Node* c) const;
-  // If the BarrierSetC2 state has kept macro nodes in its compilation unit state to be
+  // If the BarrierSetC2 state has kept barrier nodes in its compilation unit state to be
   // expanded later, then now is the time to do so.
-  virtual bool expand_macro_nodes(PhaseMacroExpand* macro) const;
+  virtual bool expand_barriers(Compile* C, PhaseIterGVN& igvn) const;
 
   static void find_dominating_barriers(PhaseIterGVN& igvn);
   static void loop_optimize_gc_barrier(PhaseIdealLoop* phase, Node* node, bool last_round);
 
+  virtual bool final_graph_reshaping(Compile* compile, Node* n, uint opcode) const;
+
+  virtual bool matcher_find_shared_visit(Matcher* matcher, Matcher::MStack& mstack, Node* n, uint opcode, bool& mem_op, int& mem_addr_idx) const;
+
 #ifdef ASSERT
-  virtual void verify_gc_barriers(bool post_parse) const;
+  virtual void verify_gc_barriers(Compile* compile, CompilePhase phase) const;
 #endif
+
+  virtual bool escape_add_to_con_graph(ConnectionGraph* conn_graph, PhaseGVN* gvn, Unique_Node_List* delayed_worklist, Node* n, uint opcode) const;
+  virtual bool escape_add_final_edges(ConnectionGraph* conn_graph, PhaseGVN* gvn, Node* n, uint opcode) const;
+
 };
 
 #endif // SHARE_GC_Z_C2_ZBARRIERSETC2_HPP

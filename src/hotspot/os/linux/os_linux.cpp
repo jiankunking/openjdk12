@@ -128,8 +128,12 @@
 // for timer info max values which include all bits
 #define ALL_64_BITS CONST64(0xFFFFFFFFFFFFFFFF)
 
-#define LARGEPAGES_BIT (1 << 6)
-#define DAX_SHARED_BIT (1 << 8)
+enum CoredumpFilterBit {
+  FILE_BACKED_PVT_BIT = 1 << 2,
+  LARGEPAGES_BIT = 1 << 6,
+  DAX_SHARED_BIT = 1 << 8
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 // global variables
 julong os::Linux::_physical_memory = 0;
@@ -323,10 +327,14 @@ void os::init_system_properties_values() {
   //        1: ...
   //        ...
   //        7: The default directories, normally /lib and /usr/lib.
-#if defined(AMD64) || (defined(_LP64) && defined(SPARC)) || defined(PPC64) || defined(S390)
-  #define DEFAULT_LIBPATH "/usr/lib64:/lib64:/lib:/usr/lib"
+#ifndef OVERRIDE_LIBPATH
+  #if defined(AMD64) || (defined(_LP64) && defined(SPARC)) || defined(PPC64) || defined(S390)
+    #define DEFAULT_LIBPATH "/usr/lib64:/lib64:/lib:/usr/lib"
+  #else
+    #define DEFAULT_LIBPATH "/lib:/usr/lib"
+  #endif
 #else
-  #define DEFAULT_LIBPATH "/lib:/usr/lib"
+  #define DEFAULT_LIBPATH OVERRIDE_LIBPATH
 #endif
 
 // Base path of extensions installed on the system.
@@ -1346,6 +1354,11 @@ void os::shutdown() {
 void os::abort(bool dump_core, void* siginfo, const void* context) {
   os::shutdown();
   if (dump_core) {
+#if INCLUDE_CDS
+    if (UseSharedSpaces && DumpPrivateMappingsInCore) {
+      ClassLoader::close_jrt_image();
+    }
+#endif
 #ifndef PRODUCT
     fdStream out(defaultStream::output_fd());
     out.print_raw("Current thread is ");
@@ -3397,10 +3410,9 @@ bool os::Linux::hugetlbfs_sanity_check(bool warn, size_t page_size) {
 // - (bit 7) dax private memory
 // - (bit 8) dax shared memory
 //
-static void set_coredump_filter(bool largepages, bool dax_shared) {
+static void set_coredump_filter(CoredumpFilterBit bit) {
   FILE *f;
   long cdm;
-  bool filter_changed = false;
 
   if ((f = fopen("/proc/self/coredump_filter", "r+")) == NULL) {
     return;
@@ -3411,17 +3423,11 @@ static void set_coredump_filter(bool largepages, bool dax_shared) {
     return;
   }
 
+  long saved_cdm = cdm;
   rewind(f);
+  cdm |= bit;
 
-  if (largepages && (cdm & LARGEPAGES_BIT) == 0) {
-    cdm |= LARGEPAGES_BIT;
-    filter_changed = true;
-  }
-  if (dax_shared && (cdm & DAX_SHARED_BIT) == 0) {
-    cdm |= DAX_SHARED_BIT;
-    filter_changed = true;
-  }
-  if (filter_changed) {
+  if (cdm != saved_cdm) {
     fprintf(f, "%#lx", cdm);
   }
 
@@ -3560,7 +3566,7 @@ void os::large_page_init() {
   size_t large_page_size = Linux::setup_large_page_size();
   UseLargePages          = Linux::setup_large_page_type(large_page_size);
 
-  set_coredump_filter(true /*largepages*/, false /*dax_shared*/);
+  set_coredump_filter(LARGEPAGES_BIT);
 }
 
 #ifndef SHM_HUGETLB
@@ -4957,6 +4963,10 @@ void os::pd_init_container_support() {
 // this is called _after_ the global arguments have been parsed
 jint os::init_2(void) {
 
+  // This could be set after os::Posix::init() but all platforms
+  // have to set it the same so we have to mirror Solaris.
+  DEBUG_ONLY(os::set_mutex_init_done();)
+
   os::Posix::init_2();
 
   Linux::fast_thread_clock_init();
@@ -5063,9 +5073,16 @@ jint os::init_2(void) {
   // initialize thread priority policy
   prio_init();
 
-  if (!FLAG_IS_DEFAULT(AllocateHeapAt)) {
-    set_coredump_filter(false /*largepages*/, true /*dax_shared*/);
+  if (!FLAG_IS_DEFAULT(AllocateHeapAt) || !FLAG_IS_DEFAULT(AllocateOldGenAt)) {
+    set_coredump_filter(DAX_SHARED_BIT);
   }
+
+#if INCLUDE_CDS
+  if (UseSharedSpaces && DumpPrivateMappingsInCore) {
+    set_coredump_filter(FILE_BACKED_PVT_BIT);
+  }
+#endif
+
   return JNI_OK;
 }
 
@@ -5938,7 +5955,7 @@ size_t os::current_stack_size() {
 static inline struct timespec get_mtime(const char* filename) {
   struct stat st;
   int ret = os::stat(filename, &st);
-  assert(ret == 0, "failed to stat() file '%s': %s", filename, strerror(errno));
+  assert(ret == 0, "failed to stat() file '%s': %s", filename, os::strerror(errno));
   return st.st_mtim;
 }
 
@@ -5956,14 +5973,6 @@ int os::compare_file_modified_times(const char* file1, const char* file2) {
 
 #ifndef PRODUCT
 
-#define test_log(...)              \
-  do {                             \
-    if (VerboseInternalVMTests) {  \
-      tty->print_cr(__VA_ARGS__);  \
-      tty->flush();                \
-    }                              \
-  } while (false)
-
 class TestReserveMemorySpecial : AllStatic {
  public:
   static void small_page_write(void* addr, size_t size) {
@@ -5979,8 +5988,6 @@ class TestReserveMemorySpecial : AllStatic {
     if (!UseHugeTLBFS) {
       return;
     }
-
-    test_log("test_reserve_memory_special_huge_tlbfs_only(" SIZE_FORMAT ")", size);
 
     char* addr = os::Linux::reserve_memory_special_huge_tlbfs_only(size, NULL, false);
 
@@ -6040,15 +6047,10 @@ class TestReserveMemorySpecial : AllStatic {
     ::munmap(mapping1, mapping_size);
 
     // Case 1
-    test_log("%s, req_addr NULL:", __FUNCTION__);
-    test_log("size            align           result");
-
     for (int i = 0; i < num_sizes; i++) {
       const size_t size = sizes[i];
       for (size_t alignment = ag; is_aligned(size, alignment); alignment *= 2) {
         char* p = os::Linux::reserve_memory_special_huge_tlbfs_mixed(size, alignment, NULL, false);
-        test_log(SIZE_FORMAT_HEX " " SIZE_FORMAT_HEX " ->  " PTR_FORMAT " %s",
-                 size, alignment, p2i(p), (p != NULL ? "" : "(failed)"));
         if (p != NULL) {
           assert(is_aligned(p, alignment), "must be");
           small_page_write(p, size);
@@ -6058,17 +6060,11 @@ class TestReserveMemorySpecial : AllStatic {
     }
 
     // Case 2
-    test_log("%s, req_addr non-NULL:", __FUNCTION__);
-    test_log("size            align           req_addr         result");
-
     for (int i = 0; i < num_sizes; i++) {
       const size_t size = sizes[i];
       for (size_t alignment = ag; is_aligned(size, alignment); alignment *= 2) {
         char* const req_addr = align_up(mapping1, alignment);
         char* p = os::Linux::reserve_memory_special_huge_tlbfs_mixed(size, alignment, req_addr, false);
-        test_log(SIZE_FORMAT_HEX " " SIZE_FORMAT_HEX " " PTR_FORMAT " ->  " PTR_FORMAT " %s",
-                 size, alignment, p2i(req_addr), p2i(p),
-                 ((p != NULL ? (p == req_addr ? "(exact match)" : "") : "(failed)")));
         if (p != NULL) {
           assert(p == req_addr, "must be");
           small_page_write(p, size);
@@ -6078,16 +6074,11 @@ class TestReserveMemorySpecial : AllStatic {
     }
 
     // Case 3
-    test_log("%s, req_addr non-NULL with preexisting mapping:", __FUNCTION__);
-    test_log("size            align           req_addr         result");
-
     for (int i = 0; i < num_sizes; i++) {
       const size_t size = sizes[i];
       for (size_t alignment = ag; is_aligned(size, alignment); alignment *= 2) {
         char* const req_addr = align_up(mapping2, alignment);
         char* p = os::Linux::reserve_memory_special_huge_tlbfs_mixed(size, alignment, req_addr, false);
-        test_log(SIZE_FORMAT_HEX " " SIZE_FORMAT_HEX " " PTR_FORMAT " ->  " PTR_FORMAT " %s",
-                 size, alignment, p2i(req_addr), p2i(p), ((p != NULL ? "" : "(failed)")));
         // as the area around req_addr contains already existing mappings, the API should always
         // return NULL (as per contract, it cannot return another address)
         assert(p == NULL, "must be");
@@ -6111,8 +6102,6 @@ class TestReserveMemorySpecial : AllStatic {
     if (!UseSHM) {
       return;
     }
-
-    test_log("test_reserve_memory_special_shm(" SIZE_FORMAT ", " SIZE_FORMAT ")", size, alignment);
 
     char* addr = os::Linux::reserve_memory_special_shm(size, alignment, NULL, false);
 

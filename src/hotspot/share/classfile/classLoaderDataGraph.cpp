@@ -29,6 +29,7 @@
 #include "classfile/metadataOnStackMark.hpp"
 #include "classfile/moduleEntry.hpp"
 #include "classfile/packageEntry.hpp"
+#include "code/dependencyContext.hpp"
 #include "logging/log.hpp"
 #include "logging/logStream.hpp"
 #include "memory/allocation.inline.hpp"
@@ -230,19 +231,21 @@ ClassLoaderData* ClassLoaderDataGraph::add(Handle loader, bool is_unsafe_anonymo
   return loader_data;
 }
 
-void ClassLoaderDataGraph::cld_do(CLDClosure* cl) {
-  assert_locked_or_safepoint_weak(ClassLoaderDataGraph_lock);
-  for (ClassLoaderData* cld = _head;  cld != NULL; cld = cld->_next) {
-    cl->do_cld(cld);
-  }
-}
-
 void ClassLoaderDataGraph::cld_unloading_do(CLDClosure* cl) {
   assert_locked_or_safepoint_weak(ClassLoaderDataGraph_lock);
   // Only walk the head until any clds not purged from prior unloading
   // (CMS doesn't purge right away).
   for (ClassLoaderData* cld = _unloading; cld != _saved_unloading; cld = cld->next()) {
     assert(cld->is_unloading(), "invariant");
+    cl->do_cld(cld);
+  }
+}
+
+// These are functions called by the GC, which require all of the CLDs, including the
+// unloading ones.
+void ClassLoaderDataGraph::cld_do(CLDClosure* cl) {
+  assert_locked_or_safepoint_weak(ClassLoaderDataGraph_lock);
+  for (ClassLoaderData* cld = _head;  cld != NULL; cld = cld->_next) {
     cl->do_cld(cld);
   }
 }
@@ -286,9 +289,12 @@ class ClassLoaderDataGraphIterator : public StackObj {
   HandleMark       _hm;  // clean up handles when this is done.
   Handle           _holder;
   Thread*          _thread;
+  NoSafepointVerifier _nsv; // No safepoints allowed in this scope
+                            // unless verifying at a safepoint.
 
 public:
-  ClassLoaderDataGraphIterator() : _next(ClassLoaderDataGraph::_head) {
+  ClassLoaderDataGraphIterator() : _next(ClassLoaderDataGraph::_head),
+     _nsv(true, !SafepointSynchronize::is_at_safepoint()) {
     _thread = Thread::current();
     assert_locked_or_safepoint(ClassLoaderDataGraph_lock);
   }
@@ -308,9 +314,14 @@ public:
     }
     return cld;
   }
-
-
 };
+
+void ClassLoaderDataGraph::loaded_cld_do(CLDClosure* cl) {
+  ClassLoaderDataGraphIterator iter;
+  while (ClassLoaderData* cld = iter.get_next()) {
+    cl->do_cld(cld);
+  }
+}
 
 // These functions assume that the caller has locked the ClassLoaderDataGraph_lock
 // if they are not calling the function from a safepoint.
@@ -496,11 +507,11 @@ bool ClassLoaderDataGraph::is_valid(ClassLoaderData* loader_data) {
 
 // Move class loader data from main list to the unloaded list for unloading
 // and deallocation later.
-bool ClassLoaderDataGraph::do_unloading(bool do_cleaning) {
+bool ClassLoaderDataGraph::do_unloading() {
   assert_locked_or_safepoint(ClassLoaderDataGraph_lock);
 
   // Indicate whether safepoint cleanup is needed.
-  _safepoint_cleanup_needed |= do_cleaning;
+  _safepoint_cleanup_needed = true;
 
   ClassLoaderData* data = _head;
   ClassLoaderData* prev = NULL;
@@ -550,11 +561,6 @@ void ClassLoaderDataGraph::clean_module_and_package_info() {
 
   ClassLoaderData* data = _head;
   while (data != NULL) {
-    // Remove entries in the dictionary of live class loader that have
-    // initiated loading classes in a dead class loader.
-    if (data->dictionary() != NULL) {
-      data->dictionary()->do_unloading();
-    }
     // Walk a ModuleEntry's reads, and a PackageEntry's exports
     // lists to determine if there are modules on those lists that are now
     // dead and should be removed.  A module's life cycle is equivalent
@@ -572,7 +578,6 @@ void ClassLoaderDataGraph::clean_module_and_package_info() {
 }
 
 void ClassLoaderDataGraph::purge() {
-  assert(SafepointSynchronize::is_at_safepoint(), "must be at safepoint!");
   ClassLoaderData* list = _unloading;
   _unloading = NULL;
   ClassLoaderData* next = list;
@@ -587,6 +592,7 @@ void ClassLoaderDataGraph::purge() {
     Metaspace::purge();
     set_metaspace_oom(false);
   }
+  DependencyContext::purge_dependency_contexts();
 }
 
 int ClassLoaderDataGraph::resize_if_needed() {

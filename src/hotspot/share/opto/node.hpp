@@ -142,6 +142,7 @@ class RegionNode;
 class RootNode;
 class SafePointNode;
 class SafePointScalarObjectNode;
+class ShenandoahBarrierNode;
 class StartNode;
 class State;
 class StoreNode;
@@ -457,9 +458,10 @@ protected:
 
   // Strip away casting.  (It is depth-limited.)
   Node* uncast() const;
-  // Return whether two Nodes are equivalent, after stripping casting
-  // and GC barriers.
-  bool eqv_uncast(const Node* n) const;
+  // Return whether two Nodes are equivalent, after stripping casting.
+  bool eqv_uncast(const Node* n) const {
+    return (this->uncast() == n->uncast());
+  }
 
   // Find out of current node that matches opcode.
   Node* find_out_with(int opcode);
@@ -674,6 +676,7 @@ public:
       DEFINE_CLASS_ID(EncodeNarrowPtr, Type, 6)
         DEFINE_CLASS_ID(EncodeP, EncodeNarrowPtr, 0)
         DEFINE_CLASS_ID(EncodePKlass, EncodeNarrowPtr, 1)
+      DEFINE_CLASS_ID(ShenandoahBarrier, Type, 7)
 
     DEFINE_CLASS_ID(Proj,  Node, 3)
       DEFINE_CLASS_ID(CatchProj, Proj, 0)
@@ -872,6 +875,7 @@ public:
   DEFINE_CLASS_QUERY(Root)
   DEFINE_CLASS_QUERY(SafePoint)
   DEFINE_CLASS_QUERY(SafePointScalarObject)
+  DEFINE_CLASS_QUERY(ShenandoahBarrier)
   DEFINE_CLASS_QUERY(Start)
   DEFINE_CLASS_QUERY(Store)
   DEFINE_CLASS_QUERY(Sub)

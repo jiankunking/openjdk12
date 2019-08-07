@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
 package java.lang;
 
 import java.lang.annotation.Annotation;
+import java.lang.constant.ClassDesc;
+import java.lang.invoke.TypeDescriptor;
 import java.lang.module.ModuleReader;
 import java.lang.ref.SoftReference;
 import java.io.IOException;
@@ -46,6 +48,7 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
+import java.lang.constant.Constable;
 import java.net.URL;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
@@ -58,7 +61,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.stream.Stream;
+import java.util.stream.Collectors;
 
 import jdk.internal.HotSpotIntrinsicCandidate;
 import jdk.internal.loader.BootLoader;
@@ -70,6 +76,7 @@ import jdk.internal.reflect.ConstantPool;
 import jdk.internal.reflect.Reflection;
 import jdk.internal.reflect.ReflectionFactory;
 import jdk.internal.vm.annotation.ForceInline;
+import sun.invoke.util.Wrapper;
 import sun.reflect.generics.factory.CoreReflectionFactory;
 import sun.reflect.generics.factory.GenericsFactory;
 import sun.reflect.generics.repository.ClassRepository;
@@ -152,7 +159,9 @@ import sun.reflect.misc.ReflectUtil;
 public final class Class<T> implements java.io.Serializable,
                               GenericDeclaration,
                               Type,
-                              AnnotatedElement {
+                              AnnotatedElement,
+                              TypeDescriptor.OfField<Class<?>>,
+                              Constable {
     private static final int ANNOTATION= 0x00002000;
     private static final int ENUM      = 0x00004000;
     private static final int SYNTHETIC = 0x00001000;
@@ -200,7 +209,8 @@ public final class Class<T> implements java.io.Serializable,
      * and {@code class}, {@code enum}, {@code interface}, or
      * <code>&#64;</code>{@code interface}, as appropriate), followed
      * by the type's name, followed by an angle-bracketed
-     * comma-separated list of the type's type parameters, if any.
+     * comma-separated list of the type's type parameters, if any,
+     * including informative bounds on the type parameters, if any.
      *
      * A space is used to separate modifiers from one another and to
      * separate any modifiers from the kind of type. The modifiers
@@ -262,17 +272,25 @@ public final class Class<T> implements java.io.Serializable,
 
             TypeVariable<?>[] typeparms = component.getTypeParameters();
             if (typeparms.length > 0) {
-                StringJoiner sj = new StringJoiner(",", "<", ">");
-                for(TypeVariable<?> typeparm: typeparms) {
-                    sj.add(typeparm.getTypeName());
-                }
-                sb.append(sj.toString());
+                sb.append(Stream.of(typeparms).map(Class::typeVarBounds).
+                          collect(Collectors.joining(",", "<", ">")));
             }
 
             for (int i = 0; i < arrayDepth; i++)
                 sb.append("[]");
 
             return sb.toString();
+        }
+    }
+
+    static String typeVarBounds(TypeVariable<?> typeVar) {
+        Type[] bounds = typeVar.getBounds();
+        if (bounds.length == 1 && bounds[0].equals(Object.class)) {
+            return typeVar.getName();
+        } else {
+            return typeVar.getName() + " extends " +
+                Stream.of(bounds).map(Type::getTypeName).
+                collect(Collectors.joining(" & "));
         }
     }
 
@@ -3399,14 +3417,14 @@ public final class Class<T> implements java.io.Serializable,
      * Helper method to get the method name from arguments.
      */
     private String methodToString(String name, Class<?>[] argTypes) {
-        StringJoiner sj = new StringJoiner(", ", getName() + "." + name + "(", ")");
+        StringBuilder sb = new StringBuilder();
+        sb.append(getName() + "." + name + "(");
         if (argTypes != null) {
-            for (int i = 0; i < argTypes.length; i++) {
-                Class<?> c = argTypes[i];
-                sj.add((c == null) ? "null" : c.getName());
-            }
+            sb.append(Stream.of(argTypes).map(c -> {return (c == null) ? "null" : c.getName();}).
+                      collect(Collectors.joining(",")));
         }
-        return sj.toString();
+        sb.append(")");
+        return sb.toString();
     }
 
     /** use serialVersionUID from JDK 1.1 for interoperability */
@@ -4015,5 +4033,69 @@ public final class Class<T> implements java.io.Serializable,
             }
         }
         return members;
+    }
+
+    /**
+     * Returns the type descriptor string for this class.
+     * <p>
+     * Note that this is not a strict inverse of {@link #forName};
+     * distinct classes which share a common name but have different class loaders
+     * will have identical descriptor strings.
+     *
+     * @return the type descriptor representation
+     * @jvms 4.3.2 Field Descriptors
+     * @since 12
+     */
+    @Override
+    public String descriptorString() {
+        if (isPrimitive())
+            return Wrapper.forPrimitiveType(this).basicTypeString();
+        else if (isArray()) {
+            return "[" + componentType.descriptorString();
+        }
+        else {
+            return "L" + getName().replace('.', '/') + ";";
+        }
+    }
+
+    /**
+     * Returns the component type of this {@code Class}, if it describes
+     * an array type, or {@code null} otherwise.
+     *
+     * @implSpec
+     * Equivalent to {@link Class#getComponentType()}.
+     *
+     * @return a {@code Class} describing the component type, or {@code null}
+     * if this {@code Class} does not describe an array type
+     * @since 12
+     */
+    @Override
+    public Class<?> componentType() {
+        return isArray() ? componentType : null;
+    }
+
+    /**
+     * Returns a {@code Class} for an array type whose component type
+     * is described by this {@linkplain Class}.
+     *
+     * @return a {@code Class} describing the array type
+     * @since 12
+     */
+    @Override
+    public Class<?> arrayType() {
+        return Array.newInstance(this, 0).getClass();
+    }
+
+    /**
+     * Returns a nominal descriptor for this instance, if one can be
+     * constructed, or an empty {@link Optional} if one cannot be.
+     *
+     * @return An {@link Optional} containing the resulting nominal descriptor,
+     * or an empty {@link Optional} if one cannot be constructed.
+     * @since 12
+     */
+    @Override
+    public Optional<ClassDesc> describeConstable() {
+        return Optional.of(ClassDesc.ofDescriptor(descriptorString()));
     }
 }

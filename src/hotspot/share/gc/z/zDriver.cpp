@@ -24,8 +24,8 @@
 #include "precompiled.hpp"
 #include "gc/shared/gcId.hpp"
 #include "gc/shared/gcLocker.hpp"
+#include "gc/shared/gcVMOperations.hpp"
 #include "gc/shared/isGCActiveMark.hpp"
-#include "gc/shared/vmGCOperations.hpp"
 #include "gc/z/zCollectedHeap.hpp"
 #include "gc/z/zDriver.hpp"
 #include "gc/z/zHeap.inline.hpp"
@@ -33,7 +33,8 @@
 #include "gc/z/zServiceability.hpp"
 #include "gc/z/zStat.hpp"
 #include "logging/log.hpp"
-#include "runtime/vm_operations.hpp"
+#include "memory/universe.hpp"
+#include "runtime/vmOperations.hpp"
 #include "runtime/vmThread.hpp"
 
 static const ZStatPhaseCycle      ZPhaseCycle("Garbage Collection Cycle");
@@ -44,6 +45,7 @@ static const ZStatPhasePause      ZPhasePauseMarkEnd("Pause Mark End");
 static const ZStatPhaseConcurrent ZPhaseConcurrentProcessNonStrongReferences("Concurrent Process Non-Strong References");
 static const ZStatPhaseConcurrent ZPhaseConcurrentResetRelocationSet("Concurrent Reset Relocation Set");
 static const ZStatPhaseConcurrent ZPhaseConcurrentDestroyDetachedPages("Concurrent Destroy Detached Pages");
+static const ZStatPhasePause      ZPhasePauseVerify("Pause Verify");
 static const ZStatPhaseConcurrent ZPhaseConcurrentSelectRelocationSet("Concurrent Select Relocation Set");
 static const ZStatPhaseConcurrent ZPhaseConcurrentPrepareRelocationSet("Concurrent Prepare Relocation Set");
 static const ZStatPhasePause      ZPhasePauseRelocateStart("Pause Relocate Start");
@@ -210,6 +212,19 @@ public:
   }
 };
 
+class ZVerifyClosure : public ZOperationClosure {
+public:
+  virtual const char* name() const {
+    return "ZVerify";
+  }
+
+  virtual bool do_operation() {
+    ZStatTimer timer(ZPhasePauseVerify);
+    Universe::verify();
+    return true;
+  }
+};
+
 class ZRelocateStartClosure : public ZOperationClosure {
 public:
   virtual const char* name() const {
@@ -367,25 +382,31 @@ void ZDriver::run_gc_cycle(GCCause::Cause cause) {
     ZHeap::heap()->destroy_detached_pages();
   }
 
-  // Phase 7: Concurrent Select Relocation Set
+  // Phase 7: Pause Verify
+  if (VerifyBeforeGC || VerifyDuringGC || VerifyAfterGC) {
+    ZVerifyClosure cl;
+    vm_operation(&cl);
+  }
+
+  // Phase 8: Concurrent Select Relocation Set
   {
     ZStatTimer timer(ZPhaseConcurrentSelectRelocationSet);
     ZHeap::heap()->select_relocation_set();
   }
 
-  // Phase 8: Concurrent Prepare Relocation Set
+  // Phase 9: Concurrent Prepare Relocation Set
   {
     ZStatTimer timer(ZPhaseConcurrentPrepareRelocationSet);
     ZHeap::heap()->prepare_relocation_set();
   }
 
-  // Phase 9: Pause Relocate Start
+  // Phase 10: Pause Relocate Start
   {
     ZRelocateStartClosure cl;
     vm_operation(&cl);
   }
 
-  // Phase 10: Concurrent Relocate
+  // Phase 11: Concurrent Relocate
   {
     ZStatTimer timer(ZPhaseConcurrentRelocated);
     ZHeap::heap()->relocate();

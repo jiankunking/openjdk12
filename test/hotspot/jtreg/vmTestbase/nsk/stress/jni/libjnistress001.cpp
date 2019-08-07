@@ -72,7 +72,7 @@ Java_nsk_stress_jni_JNIter001_jnistress (JNIEnv *env, jobject jobj, jstring jstr
         for (j=0;j<nstr;j++)
             element->checkstr[j] = (char *)c_malloc(env, DIGESTLENGTH*sizeof(char));
     }
-    for(j=0;j<DIGESTLENGTH;j++) {
+    for (j=0;j<DIGESTLENGTH;j++) {
         digest[j]=0;
     }
     element->str[allocs] = env->GetStringUTFChars(jstr,0); CE
@@ -86,24 +86,24 @@ Java_nsk_stress_jni_JNIter001_jnistress (JNIEnv *env, jobject jobj, jstring jstr
     }
     memcpy(element->checkstr[allocs],digest,DIGESTLENGTH);
     allocs++;
-    if (allocs%printperiod==0) {
+    if (allocs % printperiod == 0) {
         printf("Check string for thread %s is ", element->str[allocs-1]);
         for (j=0;j<DIGESTLENGTH;j++)
             printf("%02x", digest[j]);
         printf("\n");
     }
-    if (allocs==nstr) {
+    if (allocs == nstr) {
         printf("JNI UTF8 strings memory=%zd\n", strsize);
         tmpstr=env->NewStringUTF(element->str[allocs-1]); CE
         for (j=0; j<nstr; j++) {
 
-            for(i=0;i<DIGESTLENGTH;i++) {
+            for (i=0;i<DIGESTLENGTH;i++) {
                 digest[i]=0;
             }
             for (k=0; k < strlen(element->str[j]); k++) {
                 digest[k % DIGESTLENGTH] += element->str[j][k];
             }
-            if (memcmp(digest,element->checkstr[j],DIGESTLENGTH)==0) {
+            if (memcmp(digest,element->checkstr[j],DIGESTLENGTH) == 0) {
                 env->ReleaseStringUTFChars(jstr,element->str[j]); CE
                 element->str[j] = NULL;
                 element->checkstr[j] = NULL;
@@ -168,7 +168,7 @@ Java_nsk_stress_jni_JNIter001_jnistress1(JNIEnv *env, jobject jobj, jstring jstr
         for (j=0;j<nstr;j++)
             javachars->checkstr[j] = (char *)c_malloc(env, DIGESTLENGTH*sizeof(char));
     }
-    for(j=0;j<DIGESTLENGTH;j++) {
+    for (j=0;j<DIGESTLENGTH;j++) {
         digest[j]=0;
     }
     javachars->str[index] = env->GetStringChars(jstr,0); CE
@@ -181,18 +181,18 @@ Java_nsk_stress_jni_JNIter001_jnistress1(JNIEnv *env, jobject jobj, jstring jstr
     }
 
     //memcpy(digest, elem, javachars->size[index]);
-    for(j=0;j<elem_len; j++) {
+    for (j=0;j<elem_len; j++) {
         digest[j % DIGESTLENGTH]+=elem[j];
     }
     memcpy(javachars->checkstr[index++],digest,DIGESTLENGTH);
-    if (index%printperiod==0) {
+    if (index % printperiod == 0) {
         printf("Check string sum for thread %.*s is ", elem_len, elem);
         for (j=0;j<DIGESTLENGTH;j++)
             printf("%02x", digest[j]);
         printf("\n");
     }
     free(elem);
-    if (index==nstr) {
+    if (index == nstr) {
         printf("JNI Unicode strings memory=%ld\n",len);
         tmpstr=env->NewString(javachars->str[index-1],elem_len); CE
         for (j=0; j<nstr; j++) {
@@ -201,14 +201,14 @@ Java_nsk_stress_jni_JNIter001_jnistress1(JNIEnv *env, jobject jobj, jstring jstr
                 elem[i] = (char) javachars->str[j][i];
             }
             //memcpy(digest, elem, javachars->size[j]);
-            for(i=0;i<DIGESTLENGTH;i++) {
+            for (i=0;i<DIGESTLENGTH;i++) {
                 digest[i]=0;
             }
-            for(i=0;i<javachars->size[j]; i++) {
+            for (i=0;i<javachars->size[j]; i++) {
                 digest[i % DIGESTLENGTH]+=elem[i];
             }
             free(elem);
-            if (memcmp(digest,javachars->checkstr[j],javachars->size[j])==0) {
+            if (memcmp(digest,javachars->checkstr[j],javachars->size[j]) == 0) {
                 env->ReleaseStringChars(jstr,javachars->str[j]); CE
                 javachars->str[j] = NULL;
                 javachars->checkstr[j] = NULL;
@@ -217,7 +217,7 @@ Java_nsk_stress_jni_JNIter001_jnistress1(JNIEnv *env, jobject jobj, jstring jstr
             else {
                 equal=0;
                 printf("The Unicode element No. %d has been corrupted\n",j);
-                for(i=0;i<DIGESTLENGTH;i++) {
+                for (i=0;i<DIGESTLENGTH;i++) {
                     printf("digest[%d]=%02x checkstr[%d]=%02x\n",i,digest[i],i,javachars->checkstr[j][i]);
                 }
             }

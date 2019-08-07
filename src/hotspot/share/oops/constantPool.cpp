@@ -504,10 +504,6 @@ Klass* ConstantPool::klass_at_impl(const constantPoolHandle& this_cp, int which,
     }
   }
 
-  // Make this class loader depend upon the class loader owning the class reference
-  ClassLoaderData* this_key = this_cp->pool_holder()->class_loader_data();
-  this_key->record_dependency(k);
-
   // logging for class+resolve.
   if (log_is_enabled(Debug, class, resolve)){
     trace_class_resolution(this_cp, k);
@@ -2325,29 +2321,6 @@ void ConstantPool::patch_resolved_references(GrowableArray<Handle>* cp_patches) 
   }
 #endif // ASSERT
 }
-
-#ifndef PRODUCT
-
-// CompileTheWorld support. Preload all classes loaded references in the passed in constantpool
-void ConstantPool::preload_and_initialize_all_classes(ConstantPool* obj, TRAPS) {
-  guarantee(obj->is_constantPool(), "object must be constant pool");
-  constantPoolHandle cp(THREAD, (ConstantPool*)obj);
-  guarantee(cp->pool_holder() != NULL, "must be fully loaded");
-
-  for (int i = 0; i< cp->length();  i++) {
-    if (cp->tag_at(i).is_unresolved_klass()) {
-      // This will force loading of the class
-      Klass* klass = cp->klass_at(i, CHECK);
-      if (klass->is_instance_klass()) {
-        // Force initialization of class
-        InstanceKlass::cast(klass)->initialize(CHECK);
-      }
-    }
-  }
-}
-
-#endif
-
 
 // Printing
 

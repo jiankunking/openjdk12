@@ -133,7 +133,7 @@ class ParScanThreadState {
                      Stack<oop, mtGC>* overflow_stacks_,
                      PreservedMarks* preserved_marks_,
                      size_t desired_plab_sz_,
-                     ParallelTaskTerminator& term_);
+                     TaskTerminator& term_);
 
  public:
   AgeTable* age_table() {return &_ageTable;}
@@ -345,11 +345,6 @@ class ParNewGeneration: public DefNewGeneration {
   void handle_promotion_failed(CMSHeap* gch, ParScanThreadStateSet& thread_state_set);
 
  protected:
-
-  bool _survivor_overflow;
-
-  bool survivor_overflow() { return _survivor_overflow; }
-  void set_survivor_overflow(bool v) { _survivor_overflow = v; }
 
   void restore_preserved_marks();
 

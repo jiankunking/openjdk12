@@ -52,7 +52,6 @@ JVM_CurrentTimeMillis
 JVM_DefineClass
 JVM_DefineClassWithSource
 JVM_DesiredAssertionStatus
-JVM_DoPrivileged
 JVM_DumpAllStacks
 JVM_DumpThreads
 JVM_FillInStackTrace
@@ -122,6 +121,7 @@ JVM_GetNanoTimeAdjustment
 JVM_GetNestHost
 JVM_GetNestMembers
 JVM_GetPrimitiveArrayElement
+JVM_GetProperties
 JVM_GetProtectionDomain
 JVM_GetSimpleBinaryName
 JVM_GetStackAccessControlContext
@@ -133,7 +133,6 @@ JVM_Halt
 JVM_HasReferencePendingList
 JVM_HoldsLock
 JVM_IHashCode
-JVM_InitProperties
 JVM_InitStackTraceElement
 JVM_InitStackTraceElementArray
 JVM_InitializeFromArchive

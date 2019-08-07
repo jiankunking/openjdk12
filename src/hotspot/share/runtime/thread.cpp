@@ -41,7 +41,6 @@
 #include "interpreter/linkResolver.hpp"
 #include "interpreter/oopMapCache.hpp"
 #include "jfr/jfrEvents.hpp"
-#include "jfr/support/jfrThreadId.hpp"
 #include "jvmtifiles/jvmtiEnv.hpp"
 #include "logging/log.hpp"
 #include "logging/logConfiguration.hpp"
@@ -61,7 +60,6 @@
 #include "prims/jvm_misc.hpp"
 #include "prims/jvmtiExport.hpp"
 #include "prims/jvmtiThreadState.hpp"
-#include "prims/privilegedStack.hpp"
 #include "runtime/arguments.hpp"
 #include "runtime/atomic.hpp"
 #include "runtime/biasedLocking.hpp"
@@ -102,7 +100,7 @@
 #include "runtime/vframeArray.hpp"
 #include "runtime/vframe_hp.hpp"
 #include "runtime/vmThread.hpp"
-#include "runtime/vm_operations.hpp"
+#include "runtime/vmOperations.hpp"
 #include "runtime/vm_version.hpp"
 #include "services/attachListener.hpp"
 #include "services/management.hpp"
@@ -233,6 +231,7 @@ Thread::Thread() {
   set_active_handles(NULL);
   set_free_handle_block(NULL);
   set_last_handle_mark(NULL);
+  DEBUG_ONLY(_missed_ic_stub_refill_verifier = NULL);
 
   // This initial value ==> never claimed.
   _oops_do_parity = 0;
@@ -307,15 +306,19 @@ Thread::Thread() {
   }
 #endif // ASSERT
 
-  // Notify the barrier set that a thread is being created. Note that some
-  // threads are created before a barrier set is available. The call to
-  // BarrierSet::on_thread_create() for these threads is therefore deferred
+  // Notify the barrier set that a thread is being created. The initial
+  // thread is created before the barrier set is available.  The call to
+  // BarrierSet::on_thread_create() for this thread is therefore deferred
   // to BarrierSet::set_barrier_set().
   BarrierSet* const barrier_set = BarrierSet::barrier_set();
   if (barrier_set != NULL) {
     barrier_set->on_thread_create(this);
   } else {
-    DEBUG_ONLY(Threads::inc_threads_before_barrier_set();)
+#ifdef ASSERT
+    static bool initial_thread_created = false;
+    assert(!initial_thread_created, "creating thread before barrier set");
+    initial_thread_created = true;
+#endif // ASSERT
   }
 }
 
@@ -370,6 +373,8 @@ void Thread::call_run() {
 
   register_thread_stack_with_NMT();
 
+  JFR_ONLY(Jfr::on_thread_start(this);)
+
   log_debug(os, thread)("Thread " UINTX_FORMAT " stack dimensions: "
     PTR_FORMAT "-" PTR_FORMAT " (" SIZE_FORMAT "k).",
     os::current_thread_id(), p2i(stack_base() - stack_size()),
@@ -394,15 +399,12 @@ void Thread::call_run() {
 }
 
 Thread::~Thread() {
-  JFR_ONLY(Jfr::on_thread_destruct(this);)
-
   // Notify the barrier set that a thread is being destroyed. Note that a barrier
   // set might not be available if we encountered errors during bootstrapping.
   BarrierSet* const barrier_set = BarrierSet::barrier_set();
   if (barrier_set != NULL) {
     barrier_set->on_thread_destroy(this);
   }
-
 
   // stack_base can be NULL if the thread is never started or exited before
   // record_stack_base_and_size called. Although, we would like to ensure
@@ -1259,6 +1261,7 @@ NonJavaThread::NonJavaThread() : Thread(), _next(NULL) {
 }
 
 NonJavaThread::~NonJavaThread() {
+  JFR_ONLY(Jfr::on_thread_exit(this);)
   // Remove this thread from _the_list.
   MutexLockerEx lock(NonJavaThreadsList_lock, Mutex::_no_safepoint_check_flag);
   NonJavaThread* volatile* p = &_the_list._head;
@@ -1558,7 +1561,6 @@ void JavaThread::initialize() {
   _on_thread_list = false;
   set_thread_state(_thread_new);
   _terminated = _not_terminated;
-  _privileged_stack_top = NULL;
   _array_for_gc = NULL;
   _suspend_equivalent = false;
   _in_deopt_handler = 0;
@@ -1782,12 +1784,7 @@ void JavaThread::run() {
 
   if (JvmtiExport::should_post_thread_life()) {
     JvmtiExport::post_thread_start(this);
-  }
 
-  EventThreadStart event;
-  if (event.should_commit()) {
-    event.set_thread(JFR_THREAD_ID(this));
-    event.commit();
   }
 
   // We call another function to do the rest so we are sure that the stack addresses used
@@ -1891,17 +1888,7 @@ void JavaThread::exit(bool destroy_vm, ExitType exit_type) {
         CLEAR_PENDING_EXCEPTION;
       }
     }
-
-    // Called before the java thread exit since we want to read info
-    // from java_lang_Thread object
-    EventThreadEnd event;
-    if (event.should_commit()) {
-      event.set_thread(JFR_THREAD_ID(this));
-      event.commit();
-    }
-
-    // Call after last event on thread
-    JFR_ONLY(Jfr::on_thread_exit(this);)
+    JFR_ONLY(Jfr::on_java_thread_dismantle(this);)
 
     // Call Thread.exit(). We try 3 times in case we got another Thread.stop during
     // the execution of the method. If that is not enough, then we don't really care. Thread.stop
@@ -1990,7 +1977,7 @@ void JavaThread::exit(bool destroy_vm, ExitType exit_type) {
 
   // These things needs to be done while we are still a Java Thread. Make sure that thread
   // is in a consistent state, in case GC happens
-  assert(_privileged_stack_top == NULL, "must be NULL when we get here");
+  JFR_ONLY(Jfr::on_thread_exit(this);)
 
   if (active_handles() != NULL) {
     JNIHandleBlock* block = active_handles();
@@ -2616,8 +2603,7 @@ void JavaThread::remove_stack_guard_pages() {
 }
 
 void JavaThread::enable_stack_reserved_zone() {
-  assert(_stack_guard_state != stack_guard_unused, "must be using guard pages.");
-  assert(_stack_guard_state != stack_guard_enabled, "already enabled");
+  assert(_stack_guard_state == stack_guard_reserved_disabled, "inconsistent state");
 
   // The base notation is from the stack's point of view, growing downward.
   // We need to adjust it to work correctly with guard_memory()
@@ -2635,11 +2621,10 @@ void JavaThread::enable_stack_reserved_zone() {
 }
 
 void JavaThread::disable_stack_reserved_zone() {
-  assert(_stack_guard_state != stack_guard_unused, "must be using guard pages.");
-  assert(_stack_guard_state != stack_guard_reserved_disabled, "already disabled");
+  assert(_stack_guard_state == stack_guard_enabled, "inconsistent state");
 
   // Simply return if called for a thread that does not use guard pages.
-  if (_stack_guard_state == stack_guard_unused) return;
+  if (_stack_guard_state != stack_guard_enabled) return;
 
   // The base notation is from the stack's point of view, growing downward.
   // We need to adjust it to work correctly with guard_memory()
@@ -2840,11 +2825,6 @@ void JavaThread::oops_do(OopClosure* f, CodeBlobClosure* cf) {
     // Record JavaThread to GC thread
     RememberProcessedThread rpt(this);
 
-    // Traverse the privileged stack
-    if (_privileged_stack_top != NULL) {
-      _privileged_stack_top->oops_do(f);
-    }
-
     // traverse the registered growable array
     if (_array_for_gc != NULL) {
       for (int index = 0; index < _array_for_gc->length(); index++) {
@@ -2966,7 +2946,6 @@ void JavaThread::print_on(outputStream *st, bool print_extended_info) const {
     st->print_cr("   java.lang.Thread.State: %s", java_lang_Thread::thread_status_name(thread_oop));
   }
 #ifndef PRODUCT
-  print_thread_state_on(st);
   _safepoint_state->print_on(st);
 #endif // PRODUCT
   if (is_Compiler_thread()) {
@@ -3418,7 +3397,6 @@ size_t      JavaThread::_stack_size_at_create = 0;
 
 #ifdef ASSERT
 bool        Threads::_vm_complete = false;
-size_t      Threads::_threads_before_barrier_set = 0;
 #endif
 
 static inline void *prefetch_and_load_ptr(void **addr, intx prefetch_interval) {
@@ -3926,6 +3904,9 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // may be attached late and JVMTI must track phases of VM execution
   JvmtiExport::enter_live_phase();
 
+  // Make perfmemory accessible
+  PerfMemory::set_accessible(true);
+
   // Notify JVMTI agents that VM initialization is complete - nop if no agents.
   JvmtiExport::post_vm_initialized();
 
@@ -4111,6 +4092,17 @@ void Threads::create_vm_init_agents() {
   JvmtiExport::enter_onload_phase();
 
   for (agent = Arguments::agents(); agent != NULL; agent = agent->next()) {
+    // CDS dumping does not support native JVMTI agent.
+    // CDS dumping supports Java agent if the AllowArchivingWithJavaAgent diagnostic option is specified.
+    if (DumpSharedSpaces) {
+      if(!agent->is_instrument_lib()) {
+        vm_exit_during_cds_dumping("CDS dumping does not support native JVMTI agent, name", agent->name());
+      } else if (!AllowArchivingWithJavaAgent) {
+        vm_exit_during_cds_dumping(
+          "Must enable AllowArchivingWithJavaAgent in order to run Java agent during CDS dumping");
+      }
+    }
+
     OnLoadEntry_t  on_load_entry = lookup_agent_on_load(agent);
 
     if (on_load_entry != NULL) {
@@ -4123,6 +4115,7 @@ void Threads::create_vm_init_agents() {
       vm_exit_during_initialization("Could not find Agent_OnLoad function in the agent library", agent->name());
     }
   }
+
   JvmtiExport::enter_primordial_phase();
 }
 
@@ -4286,7 +4279,7 @@ bool Threads::destroy_vm() {
     // queue until after the vm thread is dead. After this point,
     // we'll never emerge out of the safepoint before the VM exits.
 
-    MutexLocker ml(Heap_lock);
+    MutexLockerEx ml(Heap_lock, Mutex::_no_safepoint_check_flag);
 
     VMThread::wait_for_vm_thread_exit();
     assert(SafepointSynchronize::is_at_safepoint(), "VM thread should exit at Safepoint");
@@ -4714,6 +4707,7 @@ void Threads::print_threads_compiling(outputStream* st, char* buf, int buflen) {
       CompileTask* task = ct->task();
       if (task != NULL) {
         thread->print_name_on_error(st, buf, buflen);
+        st->print("  ");
         task->print(st, NULL, true, true);
       }
     }
